@@ -91,7 +91,9 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`\n🚀 armada-daemon listening on :${PORT} (health at /api/health)\n`);
+  // DEBUG
+  console.log('🚀 DAEMON_LISTENING:', { port: PORT, version: VERSION, health: '/api/health' });
+
 });
 
 /**
@@ -102,7 +104,9 @@ server.listen(PORT, () => {
  * releasing leaves orphans, which is why R48 also requires cleanup on the next startup.
  */
 function shutdown(signal: string): void {
-  console.log(`\n👋 armada-daemon: ${signal} received, shutting down\n`);
+  // DEBUG
+  console.log('🏁 DAEMON_SHUTDOWN:', { signal });
+
   server.close(() => {
     void pool.end().then(() => process.exit(0));
   });

@@ -22,7 +22,8 @@
 # Required keys per entry (R1):
 #   id                   string, unique — embedded in every ModelBinding tag
 #   hf_id                string — HuggingFace repo, used by training and the eval gate
-#   ollama_tag           string — what armada-models serves
+#   backend              string, default `ollama` — which inference server serves this entry
+#   serving_ref          string — identifier the named backend uses; for ollama, the tag
 #   context_window       int
 #   chat_template        one of qwen3, llama3, gemma3
 #   tool_format          one of json_schema, hermes
@@ -37,7 +38,8 @@ models:
   # it is not expected to produce a model worth serving and is never promotable (R37).
   - id: qwen3-0.6b
     hf_id: Qwen/Qwen3-0.6B
-    ollama_tag: qwen3:0.6b
+    backend: ollama
+    serving_ref: qwen3:0.6b
     context_window: 32768
     chat_template: qwen3
     tool_format: hermes
@@ -56,7 +58,8 @@ models:
 
   - id: qwen3-1.7b
     hf_id: Qwen/Qwen3-1.7B
-    ollama_tag: qwen3:1.7b
+    backend: ollama
+    serving_ref: qwen3:1.7b
     context_window: 32768
     chat_template: qwen3
     tool_format: hermes
@@ -75,7 +78,8 @@ models:
 
   - id: qwen3-4b-instruct
     hf_id: Qwen/Qwen3-4B-Instruct-2507
-    ollama_tag: qwen3:4b
+    backend: ollama
+    serving_ref: qwen3:4b
     context_window: 32768
     chat_template: qwen3
     tool_format: hermes
@@ -94,7 +98,8 @@ models:
 
   - id: llama-3.2-3b-instruct
     hf_id: meta-llama/Llama-3.2-3B-Instruct
-    ollama_tag: llama3.2:3b
+    backend: ollama
+    serving_ref: llama3.2:3b
     context_window: 131072
     chat_template: llama3
     tool_format: json_schema
@@ -113,7 +118,8 @@ models:
 
   - id: gemma-3-4b-it
     hf_id: google/gemma-3-4b-it
-    ollama_tag: gemma3:4b
+    backend: ollama
+    serving_ref: gemma3:4b
     context_window: 131072
     chat_template: gemma3
     tool_format: json_schema

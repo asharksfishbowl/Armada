@@ -67,7 +67,7 @@ platform is usable.
 break Agent Definition R14a (validation fails if the base binding is absent), which both
 shipped example Agents depend on. Make the cost explicit rather than reducing it:
 
-- An init step warms `armada-models` by pulling each entry's `ollama_tag`.
+- An init step warms `armada-models` by pulling each entry's `serving_ref` (renamed from `ollama_tag` per build-plan.md; only `backend: ollama` entries are pulled).
 - `armada-forge` holds its healthcheck at 503 until pulls complete and every binding answers.
 - The first-boot cost is documented in `docs/getting-started.md` as a stated expectation.
 
