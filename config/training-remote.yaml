@@ -1,0 +1,41 @@
+# Remote training provider — Model & Training Pipeline R25, R27.
+#
+# NOT USED ON THE DEFAULT PATH. `LocalTrainingBackend` in smoke mode is what a CPU-only
+# installation runs, and it needs no account and no credential (invariant 7). This file
+# matters only when an operator explicitly submits `POST /training/runs` with
+# `backend: remote`.
+#
+# INVARIANT 8 — `api_key_env` is an environment variable NAME. The credential is read from
+# the environment at submit time and NEVER from a file in this repository (R25). An unset
+# variable fails the submission IMMEDIATELY and WITHOUT TRANSMITTING THE DATASET (edge 9),
+# so a misconfiguration cannot leak training data to a provider that will reject it.
+# The acceptance criterion is literal: grepping this repository for the key value returns
+# no matches.
+
+provider: none
+
+endpoint: https://api.example-gpu-provider.com/v1
+api_key_env: ARMADA_TRAINING_API_KEY
+
+gpu_type: a10g
+
+# R27 / edge 10 — exceeding this calls cancel(handle) and records status `cancelled`
+# with error "exceeded max_runtime_minutes".
+max_runtime_minutes: 120
+
+# R27 — progress is EVENT-DRIVEN. When set, the provider posts job updates here and forge
+# subscribes to the webhook. Provider-recommended polling is used ONLY when this is unset;
+# there are no arbitrary intervals and no fixed delays anywhere in the path.
+# Leave empty to fall back to polling.
+webhook_url: ""
+
+# Default hyperparameters for a remote quality run. Overridable per request on
+# POST /training/runs. Quality mode applies these without the smoke caps
+# (max_steps 20, max_samples 200) that LocalTrainingBackend enforces on CPU.
+defaults:
+  lora_rank: 16
+  lora_alpha: 32
+  learning_rate: 0.0002
+  max_steps: 1000
+  batch_size: 4
+  max_seq_len: 2048

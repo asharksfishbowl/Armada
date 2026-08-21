@@ -1,0 +1,33 @@
+# Corpora seeded on first startup — Agent Definition R36.
+#
+# WHY THIS FILE EXISTS. The two shipped example Agents reference Corpora by `name`
+# (invariant 4), and Agent Definition R16 fails validation when a named Corpus does not
+# exist. Without seeding, a fresh installation would ship two example Agents that both
+# fail to load — the first thing a new operator sees would be two validation errors.
+#
+# armada-forge creates each Corpus below with ZERO Sources on first startup. Because a
+# zero-chunk Corpus validates with a WARNING rather than an error (R16, R37), both example
+# Agents load and are immediately runnable, with retrieval returning nothing until the
+# operator adds Sources and ingests.
+#
+# SEEDING IS IDEMPOTENT AND NEVER TOUCHES AN EXISTING CORPUS (R36). Re-running on a second
+# startup creates no duplicates and modifies nothing — an operator who has since added
+# Sources to `recipes` does not lose them on restart.
+#
+# Seeding covers ONLY the shipped examples, not arbitrary definitions (edge 22). An
+# operator whose own Agent names an unseeded Corpus must create it; validation failing in
+# that case is correct behavior, not a gap.
+
+corpora:
+  # Referenced by agents/frontend-engineer.yaml (R34).
+  - name: frontend-docs
+    description: >-
+      Frontend framework and library documentation. Seeded empty; add Sources
+      (a docs site, a git repo) and ingest to populate it.
+
+  # Referenced by agents/chef.yaml (R35). Deliberately non-software: it is half the
+  # evidence that no field in the Agent schema privileges software engineering.
+  - name: recipes
+    description: >-
+      Recipe collections, technique references, and ingredient data. Seeded empty;
+      add Sources and ingest to populate it.

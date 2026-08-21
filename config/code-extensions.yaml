@@ -1,0 +1,97 @@
+# File extensions treated as CODE during ingestion — Model & Training Pipeline R9, R10.
+#
+# Two separate effects, both driven by this list:
+#
+# 1. EXTRACTION (R9). Ingestion extracts text from `.md`, `.mdx`, `.txt`, `.rst`, `.pdf`,
+#    `.html` and from any extension listed here. Everything else is SKIPPED. Those six
+#    prose types are spec'd directly and are NOT repeated here — this file adds to them.
+#
+# 2. CHUNKING STRATEGY (R10). A file whose extension appears here is chunked on top-level
+#    function and class boundaries and a function body is NEVER split across chunks.
+#    Everything else is chunked on heading and paragraph boundaries. Both strategies
+#    target 512 tokens with 64 tokens of overlap; a single unit above 1024 tokens is
+#    hard-split and its chunks flagged `split_oversize: true` (edge 4).
+#
+# Splitting a function in half is what makes a retrieved chunk useless — it returns a
+# signature with no body, or a body with no name. That is the whole reason two strategies
+# exist rather than one.
+#
+# Adding an extension here changes both which files are ingested and how they are chunked.
+
+extensions:
+  # JavaScript / TypeScript
+  - .js
+  - .jsx
+  - .mjs
+  - .cjs
+  - .ts
+  - .tsx
+  - .mts
+  - .cts
+
+  # Python
+  - .py
+  - .pyi
+
+  # JVM
+  - .java
+  - .kt
+  - .kts
+  - .scala
+  - .groovy
+
+  # Systems
+  - .c
+  - .h
+  - .cc
+  - .cpp
+  - .hpp
+  - .cs
+  - .go
+  - .rs
+  - .swift
+  - .m
+  - .mm
+
+  # Scripting
+  - .rb
+  - .php
+  - .pl
+  - .lua
+  - .sh
+  - .bash
+  - .zsh
+  - .fish
+  - .ps1
+
+  # Functional
+  - .hs
+  - .ml
+  - .clj
+  - .cljs
+  - .ex
+  - .exs
+  - .erl
+
+  # Data, query, and markup that carries structure worth chunking on
+  - .sql
+  - .graphql
+  - .gql
+  - .proto
+  - .tf
+  - .hcl
+
+  # Configuration formats that commonly document interfaces
+  - .yaml
+  - .yml
+  - .toml
+  - .json
+  - .jsonc
+
+  # Web
+  - .vue
+  - .svelte
+  - .css
+  - .scss
+  - .sass
+  - .less

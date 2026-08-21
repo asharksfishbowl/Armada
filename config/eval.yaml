@@ -1,0 +1,50 @@
+# Evaluation gate mode — Model & Training Pipeline R34, R34a, R34b.
+#
+# `mechanical` is the DEFAULT and requires no teacher, no credentials, and no external
+# spend (invariant 7). Per roadmap F1 and F2 it runs entirely in-process inside
+# armada-forge and never touches armada-models at all.
+
+# One of:
+#   mechanical — held_out_perplexity + tool_call_validity. task_success_rate is null.
+#                No teacher dependency, therefore NO incomplete outcome: the gate always
+#                reaches a promotion decision (R34a, R35).
+#   judge      — adds one teacher call per held-out sample against config/eval-rubric.md.
+#                task_success_rate is the fraction judged pass; held_out_perplexity is not
+#                computed. REQUIRES config/teacher.yaml `enabled: true` — selecting judge
+#                against a disabled teacher FAILS STARTUP naming both settings
+#                (R34b, edge 26), rather than deferring the failure to a promotion.
+mode: mechanical
+
+# Held-out fraction reserved by POST /datasets/{dataset_id}/split (R33).
+#
+# The split is drawn ONLY from samples with origin `distilled` or `supplied` — never
+# `trajectory`, whose reference response is a small model's own prior output and would
+# score the candidate against itself (R16a, R33).
+#
+# R33a: a run that COULD produce a promotable Adapter is rejected without a prior split.
+# A smoke run is accepted WITHOUT one, because the split exists solely to gate promotion.
+# That is what lets a trajectory-only dataset — which by R33 can never be split — still
+# prove the pipeline end to end at zero cost.
+eval_fraction: 0.1
+
+# ── Why both modes generate in-process (roadmap F1, F2) ──────────────────────
+#
+# F1: R34 as written requires generating from the candidate Adapter "using armada-models
+# locally", but R30 forbids registering an unpromoted Adapter and R31 only converts to
+# GGUF on promotion. At gate time the candidate has no GGUF and no Ollama tag — circular.
+# RULING: candidate generation runs in-process via transformers + peft, which forge
+# already carries for LocalTrainingBackend. R30 holds unamended.
+#
+# THE BASELINE GENERATES IN-PROCESS TOO, and that part is not incidental: generating the
+# baseline through armada-models would compare a Q4_K_M-quantized baseline against an fp16
+# candidate, and the quantization delta would swamp the adapter delta. The gate would
+# measure the wrong thing and reject good adapters. Both sides load the same dtype with
+# identical sampling parameters.
+#
+# F2: held_out_perplexity is not computable through Ollama at all — it returns no
+# per-token logprobs on either its OpenAI-compatible or native surface. Computed
+# in-process with transformers as a forward pass over the held-out text with labels,
+# reading outputs.loss. No generation, no additional dependency.
+#
+# Generation stays local and free under both rulings; the zero-spend property is
+# unaffected.

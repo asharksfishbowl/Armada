@@ -1,0 +1,66 @@
+# Runtime budget and context defaults — Agent Runtime R31, R31a, R33, R35-R39.
+#
+# An Agent may LOWER any budget below these defaults via `runtime.budgets` in its
+# definition, but may never RAISE one above its ceiling. Agent Definition R20 enforces
+# that at save time; the daemon additionally clamps at Run start whenever a pinned
+# snapshot exceeds a ceiling — which happens when a ceiling here is lowered AFTER an Agent
+# version was pinned — and appends an `error` Event naming the budget, the snapshot value,
+# and the ceiling (R31a, edge 28).
+
+# ── The four per-Run budgets (R31) ───────────────────────────────────────────
+# INVARIANT 6: every Run terminates. These four plus the no-progress detector are the
+# mechanism. All are checked BEFORE each Step and BEFORE each tool dispatch (R34), so a
+# budget can never be exceeded — only prevented.
+budgets:
+  max_steps: 40
+  max_model_tokens: 200000
+  max_wall_clock_seconds: 1800
+  max_tool_calls: 120
+
+# Hard upper bounds. No Agent definition may exceed these (R31a).
+budget_ceilings:
+  max_steps: 200
+  max_model_tokens: 2000000
+  max_wall_clock_seconds: 14400
+  max_tool_calls: 600
+
+# Cross-Run budgets for Team Orchestration, accounted across a Team Run and every child
+# (Team R25). A Team's `limits` may lower these but not raise them past the ceilings
+# (Team R9b).
+tree_budget_ceilings:
+  tree_max_wall_clock_seconds: 28800
+  tree_max_model_tokens: 6000000
+
+# ── No-progress detection (R33) ──────────────────────────────────────────────
+# Terminates a Run when the same tool name and byte-identical arguments recur across this
+# many consecutive Steps. In Code mode the comparison is the generated program source
+# instead (R33a). This catches the loop that budgets would otherwise only catch at
+# max_steps, long after it stopped being useful.
+no_progress_threshold: 3
+
+# ── Context management (R35-R38) ─────────────────────────────────────────────
+context:
+  # Token budget for a Step is the binding's context_window minus this (R35).
+  reserved_output_tokens: 2048
+  # The most recent N messages are never compacted (R36).
+  always_retain_messages: 6
+  # A tool result above this is truncated and spilled to
+  # /armada/tool-results/{event_id}.txt inside the sandbox (R38). A full tmpfs sets
+  # spill_failed and the Run CONTINUES — it never terminates a Run (edge 27).
+  max_tool_result_tokens: 4096
+
+# ── Tool dispatch (R24) ──────────────────────────────────────────────────────
+# Tool calls within one Step run concurrently up to this many. Results are appended to
+# history in MODEL-EMISSION order, not completion order — the loop must be reproducible
+# from the event stream regardless of which tool happened to finish first.
+max_concurrent_tools: 4
+
+# ── Retrieval defaults (R39-R41) ─────────────────────────────────────────────
+# Overridable per Agent via `corpus.auto_inject_k`.
+retrieval:
+  # Chunks auto-injected on the first Step of every Turn when a Corpus is bound (R39).
+  auto_inject_k: 4
+  # Ceiling on the `k` a Standard-mode Agent may pass to search_knowledge (R40).
+  search_max_k: 10
+  # Reciprocal Rank Fusion constant for hybrid vector + full-text retrieval (R41).
+  rrf_k: 60

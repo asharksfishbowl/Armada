@@ -1,0 +1,32 @@
+# Plugin selection, one implementation per interface — Agent Runtime R8, R14, R15.
+#
+# The Kernel registers exactly these five interfaces at startup and EXITS NON-ZERO naming
+# the plugin if one fails to load or an interface is left unregistered (R14). A missing
+# interface is a startup failure, never a runtime surprise.
+#
+# R15 is the property this file exists to enable: the agent loop resolves every capability
+# through the Kernel and must not import a concrete implementation directly. The Runtime
+# spec's final acceptance criterion tests it — replacing the RetrievalProvider entry below
+# with a stub must change retrieval behavior with NO edit to agent-loop.ts.
+
+plugins:
+  # Streaming OpenAI-compatible adapter with AbortSignal support (R16, R19).
+  # Addresses models by ModelBinding tag against config/models.yaml's endpoint.
+  ModelAdapter: OpenAICompatibleAdapter
+
+  # Assembles built-in tools, search_knowledge when a Corpus is bound, and namespaced
+  # MCP tools into the Agent's granted list (R10, R51).
+  ToolProvider: CompositeToolProvider
+
+  # One Docker container per Run (R44-R49). Sandboxes never receive the Docker socket —
+  # INVARIANT 3, the boundary is one-directional.
+  SandboxProvider: DockerSandboxProvider
+
+  # Hybrid cosine + full-text retrieval fused with RRF (R41). READ-ONLY: the daemon never
+  # writes the vector index, armada-forge owns writes (platform boundary 1).
+  RetrievalProvider: PgVectorRetrievalProvider
+
+  # Append-only writes with transactional per-run seq assignment (R54, R58) and env-var
+  # credential redaction (R59). Redaction lives in the sink, not in callers, so no caller
+  # can forget it.
+  EventSink: PostgresEventSink

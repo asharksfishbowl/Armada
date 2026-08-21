@@ -1,0 +1,34 @@
+# Model endpoint and request scheduling — Agent Runtime R16, R20-R22, R28.
+
+# The OpenAI-compatible endpoint every ModelBinding is addressed through.
+# Defaults to the armada-models service; nothing here reaches a paid provider.
+# INVARIANT 7 (zero external spend): pointing this at a hosted API is an explicit
+# operator act, never a default.
+endpoint:
+  base_url: http://armada-models:11434/v1
+  # Ollama ignores the key, but the OpenAI client library requires the header to exist.
+  api_key_env: ARMADA_MODELS_API_KEY
+  request_timeout_seconds: 600
+
+# ── Request scheduling (R20-R22) ─────────────────────────────────────────────
+# Every model request routes through the scheduler. Admission is EVENT-DRIVEN on request
+# completion (R21) — no timed polling, no fixed delays anywhere in the queue.
+#
+# These must agree with OLLAMA_MAX_LOADED_MODELS and OLLAMA_NUM_PARALLEL in
+# docker-compose.yml (roadmap F12). The daemon enforces its own limits, but Ollama
+# independently swaps models in and out of RAM when concurrent requests target different
+# tags, and a CPU reload costs seconds. Disagreement between the two shows up as
+# unexplained latency, most visibly under Team Orchestration where a manager and its
+# workers hold different tags at once.
+scheduling:
+  # FIFO queue per tag. Time spent queued is recorded as `queued_ms` on the model_request
+  # Event and does NOT count against the Run's wall-clock budget (R22).
+  max_concurrent_per_tag: 1
+  max_concurrent_total: 2
+
+# ── Code mode gate (R28) ─────────────────────────────────────────────────────
+# An Agent requesting Code mode against a binding whose context_window is below this
+# starts in Standard mode with a `mode_downgraded` Event naming the reason. Agent
+# Definition R19 rejects the same case at save time; this covers bindings that changed
+# after an Agent was saved.
+code_mode_min_context: 16384

@@ -1,0 +1,59 @@
+# Teacher model — corpus distillation and judge-mode evaluation.
+# Model & Training Pipeline R16, R16b, R16c, R34b, R34d.
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+# THIS FILE IS WHERE ZERO EXTERNAL SPEND IS ENFORCED (INVARIANT 7).
+#
+# `enabled: false` is not a placeholder — it is the setting that makes a default Armada
+# installation cost nothing and require no accounts, no credentials, and no egress.
+#
+# While disabled:
+#   - POST /datasets naming a corpus_id returns HTTP 400 naming the two teacher-free
+#     sources (`supplied_file`, `include_trajectories`) AND MAKES NO OUTBOUND REQUEST
+#     (R16b, edge 25). The rejection happens before any connection is attempted, which is
+#     what the blocked-egress acceptance test verifies.
+#   - eval `mode: judge` in config/eval.yaml FAILS STARTUP naming both settings
+#     (R34b, edge 26). The failure is at startup, never deferred to the first promotion —
+#     an operator learns their gate is misconfigured before a training run, not after.
+#
+# Turning this on is the ONLY change in the whole platform that can incur spend, and only
+# with `provider: remote`.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+enabled: false
+
+# One of:
+#   none    — the default. No teacher. Distillation and judge mode are both unavailable.
+#   local   — a model served by armada-models. Costs nothing beyond CPU time and is
+#             expected to be SLOW: a 4B teacher on CPU generates on the order of
+#             thousands of samples per day (R16c).
+#   remote  — an external OpenAI-compatible endpoint. THE ONLY OPTION THAT SPENDS MONEY.
+provider: none
+
+# Used when provider is `local` or `remote`.
+endpoint:
+  base_url: http://armada-models:11434/v1
+  model: qwen3-4b-instruct
+  # INVARIANT 8 — a variable NAME, never a value. Nothing reads a credential from this
+  # file, and a value written here would be committed to the repository.
+  api_key_env: ARMADA_TEACHER_API_KEY
+  request_timeout_seconds: 120
+
+# ── Distillation (R16) ───────────────────────────────────────────────────────
+distillation:
+  # Chunks sampled per dataset build.
+  max_chunks: 500
+  # Instruction/response pairs requested per chunk.
+  pairs_per_chunk: 3
+  # R16 — a second teacher call returns a boolean on whether the response is entailed by
+  # its source chunk. Unentailed pairs are discarded rather than trained on, because a
+  # hallucinated pair teaches the adapter to hallucinate.
+  entailment_check: true
+
+# ── Judge mode (R34b, R34d) ──────────────────────────────────────────────────
+judge:
+  # R34d — hard bound on teacher spend per gate. When the held-out set is larger, a
+  # deterministic subset seeded on adapter_id is used, so re-running a gate scores the
+  # IDENTICAL samples and cannot be gamed by resampling. Mechanical mode has no such
+  # bound because its cost is local compute.
+  max_eval_samples: 200

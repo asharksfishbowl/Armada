@@ -1,0 +1,131 @@
+# Curated BaseModel shortlist — Model & Training Pipeline R1, R2.
+#
+# EXACTLY ONE entry may carry `smoke_test: true` (R2). It is the only model
+# LocalTrainingBackend will train in smoke mode, which is the default mode on a CPU-only
+# host (R24a). Changing which entry carries it changes what a zero-cost install can train.
+#
+# An operator MAY append entries. armada-forge validates every entry against this key
+# schema at startup and exits non-zero naming the offending `id` if any is invalid (R3).
+# There is no POST /models/base — the shortlist is file-configured only (R4).
+#
+# On startup armada-forge registers one ModelBinding per entry, tagged
+# `armada/{id}-base` with `adapter_id: null` and `status: promoted` (R4a), so every entry
+# is addressable by an Agent declaring `adapter: none` with no training run having
+# happened. Removing an entry retires its base binding on the next startup (R4b).
+#
+# FIRST-BOOT COST (roadmap F3): these five pull roughly 9-10 GB from the Ollama registry
+# on a first-ever startup, and forge holds its healthcheck at 503 until each answers a
+# chat completion. See docs/getting-started.md. A registry download is not "an outbound
+# request to a paid endpoint" — the zero-spend invariant covers inference and teacher
+# providers, and the blocked-egress test is a steady-state test.
+#
+# Required keys per entry (R1):
+#   id                   string, unique — embedded in every ModelBinding tag
+#   hf_id                string — HuggingFace repo, used by training and the eval gate
+#   ollama_tag           string — what armada-models serves
+#   context_window       int
+#   chat_template        one of qwen3, llama3, gemma3
+#   tool_format          one of json_schema, hermes
+#   quantization         string — applied on GGUF export at promotion (R31)
+#   min_ram_gb           int — compared against host memory at startup, warns only (F11)
+#   trainable            bool — false rejects a training run naming the constraint (edge 7)
+#   lora_target_modules  list of strings
+#   smoke_test           bool — exactly one entry is true
+
+models:
+  # The smoke model. 0.6B at 20 steps proves the training pipeline executes end to end;
+  # it is not expected to produce a model worth serving and is never promotable (R37).
+  - id: qwen3-0.6b
+    hf_id: Qwen/Qwen3-0.6B
+    ollama_tag: qwen3:0.6b
+    context_window: 32768
+    chat_template: qwen3
+    tool_format: hermes
+    quantization: Q4_K_M
+    min_ram_gb: 2
+    trainable: true
+    lora_target_modules:
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      - gate_proj
+      - up_proj
+      - down_proj
+    smoke_test: true
+
+  - id: qwen3-1.7b
+    hf_id: Qwen/Qwen3-1.7B
+    ollama_tag: qwen3:1.7b
+    context_window: 32768
+    chat_template: qwen3
+    tool_format: hermes
+    quantization: Q4_K_M
+    min_ram_gb: 4
+    trainable: true
+    lora_target_modules:
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      - gate_proj
+      - up_proj
+      - down_proj
+    smoke_test: false
+
+  - id: qwen3-4b-instruct
+    hf_id: Qwen/Qwen3-4B-Instruct-2507
+    ollama_tag: qwen3:4b
+    context_window: 32768
+    chat_template: qwen3
+    tool_format: hermes
+    quantization: Q4_K_M
+    min_ram_gb: 6
+    trainable: true
+    lora_target_modules:
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      - gate_proj
+      - up_proj
+      - down_proj
+    smoke_test: false
+
+  - id: llama-3.2-3b-instruct
+    hf_id: meta-llama/Llama-3.2-3B-Instruct
+    ollama_tag: llama3.2:3b
+    context_window: 131072
+    chat_template: llama3
+    tool_format: json_schema
+    quantization: Q4_K_M
+    min_ram_gb: 5
+    trainable: true
+    lora_target_modules:
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      - gate_proj
+      - up_proj
+      - down_proj
+    smoke_test: false
+
+  - id: gemma-3-4b-it
+    hf_id: google/gemma-3-4b-it
+    ollama_tag: gemma3:4b
+    context_window: 131072
+    chat_template: gemma3
+    tool_format: json_schema
+    quantization: Q4_K_M
+    min_ram_gb: 6
+    trainable: true
+    lora_target_modules:
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      - gate_proj
+      - up_proj
+      - down_proj
+    smoke_test: false

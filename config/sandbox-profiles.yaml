@@ -1,0 +1,57 @@
+# Sandbox profiles — Agent Runtime R44, R44a, R45-R47.
+#
+# One container per Run, from the profile named by the Agent's `sandbox.profile`.
+#
+# INVARIANT 3 — THE SANDBOX BOUNDARY IS ONE-DIRECTIONAL. The daemon reaches into a
+# sandbox; nothing in a sandbox calls back out. No profile mounts the Docker socket, and
+# none ever may — that is what keeps a compromised sandbox from provisioning containers.
+# It is also why Code mode is restricted to sandbox-local tools (R27a): there is no
+# callback channel to carry an MCP call or a retrieval query.
+#
+# `network: egress_allowlist` IS NOT IMPLEMENTED (roadmap F5). Docker has no per-container
+# egress ACL primitive; implementing R47 needs a per-Run internal bridge plus a
+# constrained forward-proxy sidecar, which is deferred to its own backlog task. A profile
+# declaring it is REJECTED AT CONFIG LOAD with an error naming the unimplemented mode.
+# It is NOT silently downgraded to `none` — a profile that asked for a restricted network
+# and quietly got no network would be a security fault waiting to be misread as working.
+#
+# Keys per profile (R44):
+#   image              string
+#   cpu_limit          float, cores
+#   memory_limit       string, docker memory syntax
+#   network            `none` only for now; `egress_allowlist` fails config load
+#   allowed_hosts      list of strings, used only by egress_allowlist
+#   read_only_root     bool
+#   armada_tmpfs_size  string, default 64m
+#   timeout_seconds    int, per tool call (edge 5)
+
+profiles:
+  # Agent Definition R34 — agents/frontend-engineer.yaml binds this profile and grants
+  # all four workspace tools.
+  node:
+    image: node:22-bookworm-slim
+    cpu_limit: 2.0
+    memory_limit: 2g
+    network: none
+    allowed_hosts: []
+    read_only_root: false
+    # R44a — /armada is a writable tmpfs REGARDLESS of read_only_root. Oversize tool
+    # results (R38) and Code-mode result files (R27c) are written here, so a read-only
+    # root never disables either mechanism. Discarded with the container; never part of
+    # the workspace.
+    armada_tmpfs_size: 128m
+    timeout_seconds: 300
+
+  # Agent Definition R35 — agents/chef.yaml binds this. A non-software agent needs no
+  # toolchain, which is the point: the profile is as domain-neutral as the schema.
+  minimal:
+    image: debian:bookworm-slim
+    cpu_limit: 1.0
+    memory_limit: 512m
+    network: none
+    allowed_hosts: []
+    # Nothing in this profile writes outside /workspace and /armada, so the root
+    # filesystem is read-only. R44a guarantees /armada stays writable anyway.
+    read_only_root: true
+    armada_tmpfs_size: 64m
+    timeout_seconds: 120

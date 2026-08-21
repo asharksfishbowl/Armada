@@ -1,0 +1,44 @@
+# MCP servers available for Agents to grant — Agent Runtime R50-R53.
+#
+# An Agent grants servers by name in `tools.mcp`; Agent Definition R18 fails validation
+# for a name absent from this file. Tools are namespaced `{server_name}__{tool_name}` at
+# Run start (R51), so two servers exposing the same tool name stay distinct. Two entries
+# sharing a `name` cause startup to fail naming the collision (edge 18).
+#
+# CREDENTIALS — INVARIANT 8. `env_keys` lists environment variable NAMES only. Values are
+# read from the daemon's environment at Run start and are NEVER persisted to the database
+# and NEVER written into an Event: the event sink replaces any payload value sourced from
+# one of these variables with [redacted] (R59). Never put a secret in this file.
+#
+# SHIPPED EMPTY ON PURPOSE. The MVP vertical slice uses built-in sandbox-local tools only,
+# and an empty list keeps a default installation from reaching anything external
+# (invariant 7). Adding a server is a deliberate operator act.
+#
+# Note that a Code-mode Agent cannot use MCP tools at all (R27a) — there is no callback
+# channel out of the sandbox. Granting both is legal but produces a `mode_downgraded`
+# Event at Run start listing every excluded tool (R28a), and a save-time warning
+# (Agent Definition R16b).
+#
+# Entry shape (R50):
+#   name       string, unique
+#   transport  one of stdio, http
+#   command    list of strings — stdio only
+#   url        string — http only
+#   env_keys   list of environment variable NAMES, never values
+
+servers: []
+
+# Example — uncomment and supply the environment variable to enable:
+#
+# servers:
+#   - name: github
+#     transport: stdio
+#     command: ["npx", "-y", "@modelcontextprotocol/server-github"]
+#     env_keys:
+#       - GITHUB_PERSONAL_ACCESS_TOKEN
+#
+#   - name: internal-docs
+#     transport: http
+#     url: http://internal-docs-mcp:3000/mcp
+#     env_keys:
+#       - INTERNAL_DOCS_TOKEN
