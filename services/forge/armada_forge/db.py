@@ -79,6 +79,19 @@ def query_one(sql: str, params: tuple[Any, ...] | dict[str, Any] | None = None) 
     return rows[0] if rows else None
 
 
+def scalar(sql: str, params: tuple[Any, ...] | dict[str, Any] | None = None) -> Any:
+    """First column of the first row, or None.
+
+    For aggregates like `SELECT count(*)`, which structurally always return exactly one
+    row. Callers were otherwise writing `(query_one(...) or {}).get("n", 0)`, which reads
+    as though the empty case were reachable.
+    """
+    row = query_one(sql, params)
+    if row is None:
+        return None
+    return next(iter(row.values()))
+
+
 def execute(sql: str, params: tuple[Any, ...] | dict[str, Any] | None = None) -> int:
     """Run a write and return the affected row count."""
     with connection() as conn, conn.cursor() as cur:

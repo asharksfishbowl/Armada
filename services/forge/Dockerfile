@@ -8,39 +8,66 @@
 # with no configuration change, but Compose must still GRANT the container a device. See
 # the commented `deploy.resources.reservations.devices` block in docker-compose.yml.
 #
-# LATER PHASES ADD TO THIS FILE:
-#   Phase 1 (F7)  bake BAAI/bge-small-en-v1.5 weights (~130 MB) at BUILD time and set
-#                 HF_HUB_OFFLINE=1 at runtime. Fetching them at first use would fail the
-#                 blocked-egress acceptance test; offline mode makes a missing cache fail
-#                 loudly instead of silently reaching for the network.
-#   Phase 7 (F6)  bake llama.cpp's convert_hf_to_gguf.py and llama-quantize for the
-#                 merge -> GGUF -> quantize export path. Merging a 4B model in fp16 needs
-#                 roughly 8-16 GB RAM.
+# PHASE 7 ADDS (F6): llama.cpp's convert_hf_to_gguf.py and llama-quantize for the
+# merge -> GGUF -> quantize export path. Merging a 4B model in fp16 needs ~8-16 GB RAM.
 
 FROM python:3.12-slim-bookworm
 
-# git is needed by Phase 1's `git` Source fetcher (depth-1 clone, Training R8).
-# libpq5 backs psycopg's binary wheel.
+# git backs the `git` Source fetcher (depth-1 clone, Training R8).
+# libpq5 backs psycopg's binary wheel. curl is the Compose healthcheck.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git libpq5 curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
+# The CPU torch wheel, explicitly. sentence-transformers pulls torch transitively, and the
+# default wheel carries ~2 GB of CUDA libraries this image can never execute.
+RUN pip install --no-cache-dir \
+    --index-url https://download.pytorch.org/whl/cpu \
+    torch==2.5.1
+
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY armada_forge ./armada_forge
-
 # Non-root. Nothing in forge needs elevated privileges — it talks to Postgres and, from
-# Phase 1, to armada-models over HTTP.
+# the registry phase, to armada-models over HTTP.
+#
+# Created BEFORE the model download so the weights land in their final home once. Doing it
+# after meant copying ~130 MB into the user's cache, which both committed the weights to
+# the image TWICE (the original layer is immutable, so the copy adds rather than moves) and
+# put a 130 MB operation downstream of the source COPY, where every code edit re-ran it.
 RUN useradd --create-home --uid 10001 forge \
-    && mkdir -p /data/datasets /data/adapters /data/supplied \
-    && chown -R forge:forge /data /app
-USER forge
+    && mkdir -p /data/datasets /data/adapters /data/supplied /data/uploads \
+              /home/forge/.cache/huggingface \
+    && chown -R forge:forge /data /app /home/forge
 
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    HF_HOME=/home/forge/.cache/huggingface
+
+USER forge
+
+# ── ROADMAP F7: BAKE THE EMBEDDING WEIGHTS IN AT BUILD TIME ──────────────────
+# sentence-transformers fetches BAAI/bge-small-en-v1.5 (~130 MB) from HuggingFace on first
+# use. On an installation that has never been online — which is exactly what the
+# blocked-egress acceptance test (AC 176) simulates — that fetch fails at the moment an
+# operator triggers their first ingestion, long after startup reported healthy.
+#
+# Downloading here moves the network dependency to BUILD time, where it belongs. Run as
+# `forge` with HF_HOME already set, so the cache is written where it will be read.
+RUN python -c "\
+from sentence_transformers import SentenceTransformer; \
+SentenceTransformer('BAAI/bge-small-en-v1.5', device='cpu')"
+
+# F7 — no runtime HuggingFace access. Set AFTER the download, so the build can fetch and
+# the runtime cannot. A missing cache is now a loud failure at load rather than a silent
+# network call that fails the blocked-egress test.
+ENV HF_HUB_OFFLINE=1
+
+# Last, so a code-only change rebuilds exactly one small layer instead of invalidating the
+# model download and the dependency install behind it.
+COPY --chown=forge:forge armada_forge ./armada_forge
 
 EXPOSE 8000
 

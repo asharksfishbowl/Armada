@@ -167,10 +167,37 @@ Once every service is healthy:
    `chef.yaml` is not decorative. It is the evidence that no field in the Agent schema
    privileges software engineering.
 
-2. **Give a Corpus something to retrieve.** In the dashboard, open **Corpora**, select
-   `frontend-docs`, add a Source (a git repo or a docs URL), and ingest. Chunks are
-   embedded on CPU with `bge-small-en-v1.5`; re-ingesting an unchanged Source adds and
-   removes nothing.
+2. **Give a Corpus something to retrieve.** Add a Source (a git repo, a docs URL, a
+   mounted directory, or an upload) and ingest:
+
+   ```sh
+   # Add a git Source to the seeded frontend-docs Corpus
+   curl -X POST localhost:8000/corpora/$CORPUS_ID/sources \
+     -H 'Content-Type: application/json' \
+     -d '{"type":"git","location":"https://github.com/some/docs-repo",
+          "include_globs":["**/*.md"],"exclude_globs":["vendor/**"]}'
+
+   # Start ingestion — returns immediately with a job_id
+   curl -X POST localhost:8000/corpora/$CORPUS_ID/ingest
+   ```
+
+   Ingestion clones at depth 1, extracts text, chunks it, embeds each chunk on CPU with
+   `bge-small-en-v1.5`, and writes to pgvector. Progress streams over the forge WebSocket
+   at `ws://localhost:8000/ws`.
+
+   Two behaviors worth knowing:
+
+   - **Re-ingesting an unchanged Source adds and removes nothing.** Idempotency is keyed
+     on the pair `(content_sha256, source_path)`, so unchanged chunks are never
+     re-embedded — which is what makes re-ingestion cheap rather than a full rebuild.
+     Editing a file replaces exactly its chunks; deleting one removes exactly its chunks.
+   - **One bad Source does not fail the job.** A repo that will not clone is recorded
+     `failed` with its error, the remaining Sources still ingest, and the job ends
+     `partial`. A typo in one URL should not discard the work done for everything else.
+
+   Code files chunk on function and class boundaries and a function body is never split
+   across chunks; prose chunks on headings and paragraphs. Half a function is not a useful
+   retrieval result — it returns a signature with no body, or a body with no name.
 
 3. **Run an Agent.** Open **Runs**, launch `frontend-engineer` against a real task, and
    watch the event stream. Every message, tool call, tool result, and retrieval is
@@ -196,6 +223,30 @@ would train your next Adapter on every run that managed not to crash.
 achieve the task. `failed` is reserved for infrastructure faults.
 
 ---
+
+## What is built so far
+
+Armada is being built in phases. What exists today:
+
+| Surface | Status |
+|---|---|
+| `docker compose up`, all five services, six migrations | ✅ |
+| Corpus CRUD — `POST/GET/DELETE /corpora`, `GET /corpora/{id}` | ✅ |
+| Sources and ingestion — `POST /corpora/{id}/sources`, `.../ingest` | ✅ |
+| Chunking, CPU embedding, idempotent indexing | ✅ |
+| Ingestion progress over `ws://…:8000/ws` | ✅ |
+| `GET /config/capabilities` | ✅ |
+| Base ModelBinding registration and materialization | ⏳ blocked |
+| Agent runtime, agent loop, sandboxes, retrieval, teams, training, dashboard | ⏳ later phases |
+
+**Deleting a Corpus** removes it and its chunks, but **Adapters trained from it are
+retained and keep serving** — their ModelBinding tags are unaffected. A served model must
+not stop resolving because its training corpus was cleaned up.
+
+**`GET /config/capabilities`** returns exactly three fields — `teacher_enabled`,
+`eval_mode`, `local_backend_mode` — and nothing else. No credentials, no endpoints, no
+environment variable names. The dashboard uses it to render disabled-with-reason instead
+of enabled-and-guessing.
 
 ## Configuration reference
 

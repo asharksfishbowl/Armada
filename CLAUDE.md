@@ -88,9 +88,39 @@ Preserve this. A change that makes the default path require a key or a GPU is a 
 - No hosted/SaaS deployment. Compose on one host.
 - Dashboard: no light theme, no mobile/tablet layouts (desktop ≥1280px).
 
-## Tooling — not yet chosen
+## Tooling
 
-The specs deliberately do not pin build tooling, test frameworks, package manager, or linters ("those belong to the implementation spec"). **Do not invent them.** When the first task in an area needs one, raise it through the pipeline rather than silently picking. Once chosen, record the decision here.
+The specs deliberately do not pin build tooling, test frameworks, or linters ("those
+belong to the implementation spec"). Decisions made so far, recorded as they were forced
+by an actual task — **do not invent the ones still marked undecided**; raise them through
+the pipeline when a task first needs one.
+
+| Area | Decision | Forced by |
+|---|---|---|
+| `armada-forge` | Python 3.12, FastAPI + uvicorn, psycopg 3 with a connection pool | Phase 0/1 |
+| Embedding | `sentence-transformers`, CPU torch wheel, weights baked into the image, `HF_HUB_OFFLINE=1` | Phase 1 (roadmap F7) |
+| `armada-daemon` | Node 22, TypeScript strict, `node:http` (no framework yet), `pg` | Phase 0 |
+| `armada-db` | `pgvector/pgvector:pg16`; `gen_random_uuid()` from core, not `uuid-ossp` | Phase 0 |
+| Migrations | Plain SQL under `db/migrations/`, applied by `db/apply-migrations.sh`, tracked in `schema_migrations` | Phase 0 |
+| `armada-dashboard` | **Undecided.** Phase 0 ships an nginx static placeholder precisely so Phase 8 can pick the bundler and state library | — |
+| Test framework | **Undecided** for both services | — |
+| Linter / formatter | **Undecided** for both services | — |
+
+### Conventions that are already load-bearing
+
+- **Config validation happens at startup, never at first use.** `armada_forge/config.py`
+  collects *every* fault and exits non-zero listing all of them. Two acceptance criteria
+  depend on this. A misconfiguration that surfaces at first promotion surfaces after a
+  training run has already been paid for.
+- **Credentials are environment-variable NAMES in config files, never values.** Fields are
+  suffixed `_api_key_env`. Nothing reads a secret from a file in this repo.
+- **Migrations are transactional and self-recording.** Each wraps itself in `BEGIN/COMMIT`
+  and ends with `INSERT INTO schema_migrations`. `apply-migrations.sh` refuses to run a
+  file whose recorded version disagrees with its filename — that skew would silently
+  re-apply a migration on every boot.
+- **`console.log` in TypeScript must follow the repo's debug format** (a hook enforces it):
+  blank line, `// DEBUG`, `console.log('🚀 LABEL:', { data })`, blank line. Only certain
+  emoji are accepted.
 
 ## Pipeline Conventions
 
