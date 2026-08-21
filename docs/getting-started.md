@@ -236,8 +236,22 @@ Armada is being built in phases. What exists today:
 | Chunking, CPU embedding, idempotent indexing | ✅ |
 | Ingestion progress over `ws://…:8000/ws` | ✅ |
 | `GET /config/capabilities` | ✅ |
+| Daemon: single-port gateway, plugin kernel, event log, `GET /api/health` | ✅ |
+| Run event stream over `ws://…:8080/ws` with ordered replay | ✅ |
 | Base ModelBinding registration and materialization | ⏳ blocked |
-| Agent runtime, agent loop, sandboxes, retrieval, teams, training, dashboard | ⏳ later phases |
+| Agent definition, agent loop, sandboxes, retrieval, teams, training, dashboard | ⏳ later phases |
+
+**`GET /api/health`** reports 200 or 503 from **daemon-local facts only** — plugins
+registered and database reachable. It also carries a `services` strip reporting whether
+`forge` and `models` are reachable, but *peer reachability never changes the status code*.
+Compose gates dependent services on this healthcheck, so a fan-out that could 503 the
+daemon would turn one peer hiccup into a restart cascade — taking down the endpoint that
+would have explained it.
+
+**Subscribing to a run's events:** connect to `ws://localhost:8080/ws` and send
+`{"subscribe": {"run_id": "..."}}`. You receive every recorded Event in `seq` order before
+any live one. Reconnecting replays the whole stream again — the gateway keeps no
+per-connection state, so the stream is always reconstructed from the log.
 
 **Deleting a Corpus** removes it and its chunks, but **Adapters trained from it are
 retained and keep serving** — their ModelBinding tags are unaffected. A served model must

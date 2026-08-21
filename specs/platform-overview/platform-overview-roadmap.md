@@ -4,13 +4,17 @@
 **Specs reviewed:** `model-training-pipeline`, `agent-runtime`, `agent-definition`,
 `team-orchestration` (implementable) + `platform-overview`, `design-dashboard` (context/design)
 
-> ## ⚠ STATUS: PARTIALLY SUPERSEDED — read `specs/build-plan/build-plan.md` first
+> ## ⚠ STATUS: PART 3 SUPERSEDED — `specs/build-plan/build-plan.md` GOVERNS
 >
-> `specs/build-plan/build-plan.md` was authored after this document and is a `/spec`-audited
-> spec that declares itself the input to `build-queue.groovy`. It specifies **fifteen** phases;
-> Part 3 below specifies nine. **Where the two disagree, build-plan.md is the better document
-> and my assessment is that it should govern** — the divergence is flagged at the top of
-> `build-queue.groovy` and is the Director's call to settle, not mine.
+> **Ruled by the user 2026-08-21 (Inbox `1787316112797g18zid`, ISSUE #3):** "build-plan.md
+> governs — re-cut the queue to 15 phases." `build-queue.groovy` was re-cut to its P0–P14 the
+> same day. `specs/build-plan/build-plan.md` is a `/spec`-audited spec that declares itself the
+> input to `build-queue.groovy`; this is a working note. **Part 3 below is dead — do not build
+> from it.**
+>
+> One deliberate divergence from build-plan, also ruled: `GET /config/capabilities` had already
+> shipped in P1, so it stays there rather than moving to P11 under Req 22. Moving working code
+> to satisfy a plan boundary is not worth it.
 >
 > Specifically superseded here:
 > - **F3** — build-plan D1 replaces eager first-boot pulls with a registration/materialization

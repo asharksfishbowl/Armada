@@ -55,6 +55,21 @@ context:
 # from the event stream regardless of which tool happened to finish first.
 max_concurrent_tools: 4
 
+# ── Health (design R35a-R35d, roadmap F13) ───────────────────────────────────
+# GET /api/health reports peer reachability for the dashboard's service strip.
+#
+# ⚠ THE PEER FAN-OUT NEVER AFFECTS THE ENDPOINT'S STATUS CODE. 200/503 is decided by
+# daemon-local facts only — plugins registered, database reachable (R3a). Compose gates
+# dependent services on this healthcheck, so a fan-out that could 503 the daemon would
+# turn any peer hiccup into a restart cascade, taking down the endpoint that would have
+# explained it. The strip reports a degraded PEER, never a degraded SELF.
+#
+# A peer's cached status is refreshed when a health request finds it older than this, and
+# the response is served from cache either way. So repeated polls inside one interval
+# issue no extra probes, and the daemon's own latency never depends on a peer answering.
+health:
+  probe_interval_seconds: 15
+
 # ── Retrieval defaults (R39-R41) ─────────────────────────────────────────────
 # Overridable per Agent via `corpus.auto_inject_k`.
 retrieval:

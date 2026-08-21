@@ -13,11 +13,14 @@
     "dev": "tsc --watch"
   },
   "dependencies": {
-    "pg": "^8.13.1"
+    "pg": "^8.13.1",
+    "ws": "^8.18.0",
+    "yaml": "^2.6.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "@types/pg": "^8.11.10",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "@types/ws": "^8.5.13"
   }
 }
