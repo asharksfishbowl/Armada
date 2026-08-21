@@ -64,6 +64,20 @@ A trajectory-only dataset cannot be split, and therefore cannot produce a promot
 
 ---
 
+## What the free gate actually proves
+
+`mode: mechanical` is the strongest promotion gate obtainable at zero cost. It is worth being precise about what a pass means, because it is less than it sounds.
+
+**It scores an artifact that is not the one that ships.** Evaluation runs in-process against base weights plus the unmerged adapter in full precision. What actually serves is merged, GGUF-converted, and quantized. Quantization damage is not measured.
+
+Fixing that would mean quantizing before evaluating — but quantization happens only on promotion, and promotion requires passing the gate. Inverting that order is a bigger change than it looks, and the obvious shortcut (registering the candidate so it can be evaluated through the model server) would make an unpromoted adapter briefly servable to the whole daemon, which is precisely the state the promotion rule exists to prevent.
+
+**Its held-out set comes from the training distribution.** The split is reserved from the same dataset the adapter trained on, so perplexity measures fit to that distribution, not generalization to the task. And `tool_call_validity` is null whenever the held-out samples presented no tool schemas — the common case for operator-supplied JSONL — which leaves the default gate resting on a single in-distribution perplexity comparison.
+
+**So a mechanical pass means: this training run did not damage the model.** It is a regression check, not evidence the adapter is better at the job. That is a real and useful thing to know, and it costs nothing. It is not a quality bar.
+
+For an actual quality bar: supply a held-out set drawn from outside the training data, or enable judge mode. Both are described in [Configuration](Configuration.md).
+
 ## What the free path does not give you
 
 **Promoted adapters.** Smoke runs are unpromotable by design. A 0.6B model at 20 steps proves the pipeline executes end to end; it does not produce a model worth serving. A smoke adapter is rejected **before evaluation runs at all** — it carries no scores, because spending judge tokens on something that cannot be promoted under any outcome is never correct.

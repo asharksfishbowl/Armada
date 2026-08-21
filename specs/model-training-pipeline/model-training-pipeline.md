@@ -91,6 +91,22 @@ The `armada-forge` service turns raw domain material into the two artifacts an A
 34c. **Judge mode only.** The judge is invoked with the candidate's and the baseline's completions for the same sample in a single call, with their order determined by the parity of the sample index, so position bias cannot systematically favour either model. The judge returns a verdict per completion, not a preference between them.
 34d. **Judge mode only.** Teacher spend is bounded: the gate judges at most `max_eval_samples` (`config/teacher.yaml`, default 200) held-out samples. When the held-out set is larger, a deterministic sample seeded on `adapter_id` is used so a re-run of the same gate scores the same subset. Mechanical mode has no such bound, because its cost is local compute.
 35. An Adapter is promoted only if the gate completed and every scored metric is at least as good as the BaseModel's: `tool_call_validity` greater than or equal (both modes); `held_out_perplexity` less than or equal (mechanical mode); `task_success_rate` greater than or equal (judge mode). When the gate completed and any scored metric is worse, the Adapter is set to `rejected` and both score sets are persisted. When the gate did not complete — in judge mode, the teacher was unreachable or `judge_errors` exceeded half the evaluated samples — the Adapter is left at `pending_eval` and is not rejected, because an absent judgement is not a failing judgement. Mechanical mode has no external dependency and therefore no incomplete outcome.
+35a. `tool_call_validity` is **null**, not zero, when no tool calls were emitted across the generated completions — which is the common case for a dataset built from operator-supplied JSONL, since those samples present no tool schemas at generation time. A null metric is **excluded from the comparison in Requirement 35** rather than compared. Treating a 0/0 denominator as a score would either block every promotion or pass every one, depending on the comparison's direction; neither is a judgement.
+
+### Recorded limitations of the gate
+
+These are known, accepted, and stated here rather than discovered later. Both weaken what a passing gate proves; neither is a defect to be fixed inside this spec.
+
+35b. **The gate scores an artifact that is not the one that ships.** Evaluation runs in-process against base weights plus the *unmerged* adapter in full precision, while a promoted Adapter serves as merged, GGUF-converted, and quantized weights (Requirement 31). The gate therefore judges a different artifact from the one an Agent will bind.
+
+Closing this properly would require quantizing before evaluating, but quantization happens only on promotion and promotion requires passing the gate — inverting that order is a larger change than this spec makes. The obvious alternative, registering the candidate with `armada-models` for the duration of the gate, is rejected because it makes an unpromoted Adapter servable to the entire daemon, which is the exact state Requirement 30 exists to forbid. The limitation is accepted; quantization damage is not currently measured.
+
+35c. **A mechanical pass is a smoke test, not a quality bar.** The held-out split is reserved from the same dataset the Adapter trained on, so `held_out_perplexity` measures fit to the training distribution rather than generalization to the task. Taken together with Requirement 35a — which commonly nulls the only other mechanical metric — the default gate reduces to a single in-distribution perplexity comparison.
+
+That is sufficient to catch a training run that damaged the model, and it is the strongest gate obtainable at zero cost. It is **not** evidence the Adapter is better at the task. An operator who wants a quality bar should supply an independent held-out set drawn from outside the training data, or enable judge mode (Requirement 34b).
+
+35d. Both limitations above are surfaced in the dashboard's evaluation view alongside the scores. An operator reading a passing gate must be able to see what it did and did not measure without consulting this spec.
+
 36. Evaluation results are written to the `evaluations` table with `evaluation_id`, `adapter_id`, `mode` (one of `mechanical`, `judge`), `candidate_scores` (jsonb), `baseline_scores` (jsonb), `samples_evaluated` (int), `judge_errors` (int, always 0 in mechanical mode), `completed` (bool), `passed` (bool, null when `completed` is false), `error` (text, nullable), `evaluated_at`.
 37. An Adapter produced by a run with `run_kind: smoke` is never promotable, by this route or by `POST /adapters/{adapter_id}/promote`. It is rejected before evaluation runs, per Requirement 33b, so it carries no scores at all rather than scores that were computed and then discarded.
 
@@ -183,6 +199,8 @@ The `armada-forge` service turns raw domain material into the two artifacts an A
 - [ ] Samples with `origin: supplied` appear in `/data/datasets/{dataset_id}.eval.jsonl` after a split; samples with `origin: trajectory` do not.
 - [ ] A smoke Adapter produces zero rows in `evaluations` and zero judge calls, verified by an unchanged teacher request count.
 - [ ] With `mode: mechanical`, a promotion decision is reached with zero teacher calls, and `evaluations.mode` records `mechanical` with a null `task_success_rate`.
+- [ ] A gate over a held-out set that emitted no tool calls records `tool_call_validity: null` — not `0` — and reaches a promotion decision on the remaining metrics rather than blocking or auto-passing on it.
+- [ ] The dashboard's evaluation view states, for a passing mechanical gate, both that the scored artifact was unquantized and that the held-out set came from the training distribution.
 - [ ] Setting `mode: judge` with `teacher.enabled: false` causes `armada-forge` startup to exit non-zero naming both settings.
 - [ ] `LocalTrainingBackend` on a host with no CUDA device rejects `qwen3-4b-instruct` naming both the model and the absent GPU, and does not fall back to `qwen3-0.6b`.
 
