@@ -1,0 +1,52 @@
+Copyright (c) 2026 asharksfishbowl. All rights reserved.
+
+PROPRIETARY AND CONFIDENTIAL
+
+This software and its associated documentation, specifications, configuration,
+and other materials (collectively, the "Software") are the proprietary property
+of the copyright holder.
+
+NO LICENSE IS GRANTED
+
+No license, express or implied, is granted to any person or entity to use,
+copy, modify, merge, publish, distribute, sublicense, sell, or create
+derivative works of the Software, in whole or in part, by any means.
+
+All rights not expressly granted in writing by the copyright holder are
+reserved.
+
+PUBLIC VISIBILITY IS NOT A LICENSE
+
+The source repository for the Software may be publicly readable. Public
+readability, and any rights granted to other users by the terms of service of
+the hosting platform (including but not limited to viewing and forking within
+that platform), do not constitute a license to use the Software for any
+purpose, and do not place the Software in the public domain or under any
+open-source license.
+
+THIRD-PARTY COMPONENTS
+
+The Software incorporates, depends upon, or interoperates with third-party
+components that are licensed separately by their respective copyright holders.
+Nothing in this license alters, restricts, or supersedes the terms applicable
+to those components, and nothing in those components' terms grants any right
+to the Software itself. See THIRD_PARTY_NOTICES.md for the current inventory
+and the obligations attached to each component.
+
+Certain machine-learning model weights that the Software is configured to
+retrieve are governed by their own licenses, some of which are not open-source
+and impose conditions on use, distribution, naming, and downstream terms. Those
+conditions apply independently of this license. See THIRD_PARTY_NOTICES.md.
+
+NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+CONTACT
+
+For licensing inquiries, contact the copyright holder.

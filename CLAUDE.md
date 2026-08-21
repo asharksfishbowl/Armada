@@ -88,6 +88,32 @@ Preserve this. A change that makes the default path require a key or a GPU is a 
 - No hosted/SaaS deployment. Compose on one host.
 - Dashboard: no light theme, no mobile/tablet layouts (desktop ≥1280px).
 
+## Licensing — proprietary
+
+Armada is **proprietary, all rights reserved** (`LICENSE`). Sole proprietor, sole users.
+The GitHub repository is **public**, which is deliberate and not a license — readability
+grants no right to use, copy, modify, or distribute.
+
+Constraints that follow, and that any change must respect:
+
+- **Never add a GPL or AGPL dependency.** AGPL in particular is incompatible with keeping
+  a network-served Armada proprietary. Permissive (MIT/BSD/Apache 2.0) only.
+- **`psycopg` is LGPL-3.0** — the one copyleft dependency. Fine as used (imported at
+  runtime, user-replaceable). Do not vendor, fork, or patch it.
+- **Check a base model's license before adding it to `config/base-models.yaml`.**
+  Apache 2.0 / MIT is fine. A custom license needs its naming, attribution, and
+  downstream-terms clauses read and recorded in `THIRD_PARTY_NOTICES.md` first.
+- **Two shipped base models are not open source.** Llama 3.2 requires "Built with Llama"
+  attribution and that a distributed derivative's name *begin with* "Llama" — which
+  Armada's `armada/{base_model_id}-{corpus}-v{n}` tag scheme does not satisfy. Gemma 3
+  carries use restrictions and downstream terms pass-through. **Both obligations attach on
+  distribution only**, so neither is live while Armada is single-operator and self-hosted.
+- **Prior art is reimplemented, not vendored.** DeepSeek Harness and OpenClaw contributed
+  architecture only. No code, therefore no attribution obligation.
+
+Update `THIRD_PARTY_NOTICES.md` whenever a dependency or base model is added.
+Full reasoning: `docs/Licensing.md`.
+
 ## Tooling
 
 The specs deliberately do not pin build tooling, test frameworks, or linters ("those

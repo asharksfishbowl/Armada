@@ -149,4 +149,8 @@ Requirements are numbered and referenced across specs (e.g. "Agent Runtime R25")
 
 ## License
 
-Not yet chosen.
+**Proprietary. All rights reserved.** See [LICENSE](LICENSE).
+
+The repository is publicly readable; that is not a license. No permission is granted to use, copy, modify, or distribute Armada.
+
+Third-party dependencies are licensed separately and are all compatible with proprietary use. **Two of the five shipped base models — Llama 3.2 and Gemma 3 — are not open source** and carry attribution, naming, and downstream-terms obligations that activate on distribution. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [docs/Licensing.md](docs/Licensing.md).

@@ -35,6 +35,7 @@ Armada specializes a model two ways at once, and keeps them independent. A **Cor
 |---|---|
 | [Specifications](Specifications.md) | How specs are structured, requirement numbering, which spec owns what |
 | [Contributing](Contributing.md) | Pipeline conventions, branch naming, the spec-first workflow |
+| [Licensing](Licensing.md) | Proprietary posture, model-license constraints, what triggers obligations |
 
 ---
 
