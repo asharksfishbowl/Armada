@@ -4,6 +4,25 @@
 **Specs reviewed:** `model-training-pipeline`, `agent-runtime`, `agent-definition`,
 `team-orchestration` (implementable) + `platform-overview`, `design-dashboard` (context/design)
 
+> ## ⚠ STATUS: PARTIALLY SUPERSEDED — read `specs/build-plan/build-plan.md` first
+>
+> `specs/build-plan/build-plan.md` was authored after this document and is a `/spec`-audited
+> spec that declares itself the input to `build-queue.groovy`. It specifies **fifteen** phases;
+> Part 3 below specifies nine. **Where the two disagree, build-plan.md is the better document
+> and my assessment is that it should govern** — the divergence is flagged at the top of
+> `build-queue.groovy` and is the Director's call to settle, not mine.
+>
+> Specifically superseded here:
+> - **F3** — build-plan D1 replaces eager first-boot pulls with a registration/materialization
+>   split, so first boot transfers zero model bytes. That is strictly better than F3's
+>   "keep the 10 GB pull and document it", and F3 should be read as withdrawn.
+> - **Part 3's nine-phase plan** — see build-plan.md P0–P14.
+>
+> Still current and not duplicated there: F13 (the health-strip fan-out must not affect
+> `GET /api/health`'s status code) and Part 2's reconciled rulings on the design spec's nine
+> dependencies. build-plan.md's defect list also catches D3, D4, D5, D6b, and D6d, which this
+> document missed entirely.
+
 This document records (1) the feasibility review against a CPU-only Docker host, (2) rulings
 on the design spec's nine Unresolved Dependencies, and (3) the phase plan that
 `build-queue.groovy` implements. Where a ruling amends a spec requirement, the amendment is

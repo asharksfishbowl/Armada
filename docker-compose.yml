@@ -1,0 +1,227 @@
+# Armada — five services on one host.
+#
+# CPU-ONLY. No service requires a GPU to start; that is a platform-wide non-goal, not a
+# temporary limitation. See the commented GPU block on armada-forge for the upgrade path.
+#
+# ZERO EXTERNAL SPEND (invariant 7). A default `docker compose up` needs no accounts, no
+# credentials, and no egress to any model provider. The only network fetches on a
+# first-ever boot are image pulls and the Ollama model pull described in
+# docs/getting-started.md — neither is an inference or teacher call, and neither costs
+# money. Every *_API_KEY variable below is optional and unset by default.
+
+name: armada
+
+# Database identity in ONE place. Previously the DSN was written out per service and the
+# user/db name appeared separately in the Postgres env and its healthcheck — six edits to
+# rename a role, with a failure mode where the db reports healthy (its healthcheck was
+# edited from the same block) while migrate, forge, and daemon all fail to connect.
+x-db: &db-env
+  DATABASE_URL: postgres://${POSTGRES_USER:-armada}:${POSTGRES_PASSWORD:-armada}@armada-db:5432/${POSTGRES_DB:-armada}
+
+# Nothing may observe a half-migrated schema, so every database consumer waits for the
+# one-shot migrate job to exit 0 — not merely for Postgres to accept connections.
+x-db-ready: &db-ready
+  armada-db:
+    condition: service_healthy
+  armada-migrate:
+    condition: service_completed_successfully
+
+services:
+  # ── Postgres + pgvector ────────────────────────────────────────────────────
+  # Relational state AND the vector index in one store. Keeping them together is what
+  # lets hybrid retrieval (Runtime R41) fuse a cosine search and a tsvector search in a
+  # single query rather than across two systems.
+  armada-db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-armada}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-armada}
+      POSTGRES_DB: ${POSTGRES_DB:-armada}
+    volumes:
+      - armada-db-data:/var/lib/postgresql/data
+    healthcheck:
+      # Naming the database matters: without -d, pg_isready probes the default database
+      # and can report ready before first-boot initdb has created ours.
+      #
+      # `$$` escapes Compose interpolation so the literal `${POSTGRES_USER}` reaches the
+      # shell INSIDE the container, where it is set. A single `$` would be substituted
+      # host-side — where these are normally unset — silently producing `pg_isready -U -d`.
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+
+  # ── Migrations (one-shot) ──────────────────────────────────────────────────
+  # Runs to completion and exits. Every service that touches the database gates on
+  # `service_completed_successfully`, so no service can observe a half-migrated schema.
+  #
+  # Idempotent: apply-migrations.sh skips any migration already recorded in
+  # schema_migrations, so a restart applies nothing on an up-to-date database.
+  armada-migrate:
+    image: postgres:16-alpine
+    depends_on:
+      armada-db:
+        condition: service_healthy
+    environment:
+      <<: *db-env
+      MIGRATIONS_DIR: /migrations
+    volumes:
+      - ./db/migrations:/migrations:ro
+      - ./db/apply-migrations.sh:/apply-migrations.sh:ro
+    entrypoint: ["/bin/sh", "/apply-migrations.sh"]
+    restart: "no"
+
+  # ── Ollama ─────────────────────────────────────────────────────────────────
+  # OpenAI-compatible inference for every registered ModelBinding.
+  armada-models:
+    image: ollama/ollama:latest
+    environment:
+      # ROADMAP F12 — these MUST agree with config/models.yaml's `scheduling` block.
+      # The daemon enforces max_concurrent_per_tag and max_concurrent_total, but Ollama
+      # independently swaps models in and out of RAM when concurrent requests target
+      # different tags, and a reload on CPU costs seconds. Disagreement shows up as
+      # unexplained latency — most visibly under Team Orchestration, where a manager and
+      # its workers hold different tags at once.
+      #
+      # max_concurrent_total: 2  ->  OLLAMA_MAX_LOADED_MODELS: 2
+      OLLAMA_MAX_LOADED_MODELS: 2
+      OLLAMA_NUM_PARALLEL: 2
+      OLLAMA_HOST: 0.0.0.0
+    volumes:
+      - armada-models-data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    restart: unless-stopped
+
+  # ── Forge (Python) ─────────────────────────────────────────────────────────
+  # Ingestion, datasets, training, registry, evaluation. WRITES the vector index;
+  # never serves a retrieval query to an agent (platform boundary 1).
+  armada-forge:
+    build:
+      context: ./services/forge
+    depends_on:
+      <<: *db-ready
+      armada-models:
+        condition: service_healthy
+    environment:
+      <<: *db-env
+      ARMADA_VERSION: ${ARMADA_VERSION:-0.1.0}
+      # Optional and unset by default (invariant 7). Nothing on the default path reads
+      # these — they exist so an operator who opts into a teacher or a remote training
+      # provider supplies the credential by NAME, never by writing it into a config file
+      # (invariant 8).
+      ARMADA_TEACHER_API_KEY: ${ARMADA_TEACHER_API_KEY:-}
+      ARMADA_TRAINING_API_KEY: ${ARMADA_TRAINING_API_KEY:-}
+      ARMADA_MODELS_API_KEY: ${ARMADA_MODELS_API_KEY:-}
+    volumes:
+      - ./config:/config:ro
+      - armada-forge-data:/data
+    ports:
+      - "${ARMADA_FORGE_PORT:-8000}:8000"
+    healthcheck:
+      # start_period is generous because Phase 1 adds base-ModelBinding reconciliation to
+      # this endpoint. It does NOT need to cover a multi-gigabyte model pull: roadmap F3's
+      # eager-pull design (hold at 503 until all five models answer) is SUPERSEDED by
+      # build-plan D1 — registration writes a record, and materialization is a separate
+      # explicit act, so a first boot transfers zero model bytes.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    restart: unless-stopped
+
+    # ROADMAP F8 — UNCOMMENT TO USE A GPU.
+    # Platform Overview claims adding a GPU needs no configuration change. That is true of
+    # ARMADA — LocalTrainingBackend detects CUDA at startup and switches from smoke to
+    # quality mode on its own — but NOT of Compose, which must still grant the device.
+    # Uncommenting is the whole change; nothing in Armada's config moves.
+    #
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # ── Daemon (TypeScript) ────────────────────────────────────────────────────
+  # Gateway, kernel, agent loop, sandbox provisioning, teams, event log.
+  armada-daemon:
+    build:
+      context: ./services/daemon
+    depends_on:
+      <<: *db-ready
+      armada-forge:
+        condition: service_healthy
+    environment:
+      <<: *db-env
+      ARMADA_PORT: 8080
+      ARMADA_VERSION: ${ARMADA_VERSION:-0.1.0}
+      ARMADA_FORGE_URL: http://armada-forge:8000
+      ARMADA_MODELS_API_KEY: ${ARMADA_MODELS_API_KEY:-}
+    volumes:
+      - ./config:/config:ro
+      - ./agents:/agents:ro
+      - ./teams:/teams:ro
+      # ROADMAP F9 — THE DOCKER SOCKET, AS A DELIBERATE DECISION.
+      #
+      # DockerSandboxProvider (Runtime R44-R49) provisions one SIBLING container per Run,
+      # which requires talking to the host Docker daemon. This mount is
+      # HOST-ROOT-EQUIVALENT for the armada-daemon process. It is accepted under Armada's
+      # single-operator, trusted-network posture — multi-tenant auth and RBAC are
+      # platform-wide non-goals, so there is no privilege boundary here to breach.
+      #
+      # It does NOT weaken invariant 3. The sandbox boundary is one-directional: the
+      # daemon reaches into a sandbox, nothing in a sandbox reaches out. SANDBOX
+      # CONTAINERS NEVER RECEIVE THIS SOCKET (R46), no profile in
+      # config/sandbox-profiles.yaml may ever mount it, and Code mode is confined to
+      # sandbox-local tools precisely because no callback channel exists (R27a).
+      #
+      # Anyone reviewing this: a sandbox with the socket could provision an unconstrained
+      # container and escape. That is why the mount appears here and nowhere else.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Run workspaces, bind-mounted into sandboxes at /workspace (R45). Apart from this
+      # and the per-container /armada tmpfs, no host path is ever mounted into a sandbox.
+      - armada-workspaces:/workspaces
+    ports:
+      # R1 — ONE port serving both /api/* and /ws.
+      - "${ARMADA_PORT:-8080}:8080"
+    healthcheck:
+      # Runtime R3a. Dependent services gate on this.
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:8080/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  # ── Dashboard (React) ──────────────────────────────────────────────────────
+  # The only interface for v1 — there is no messaging-channel gateway.
+  armada-dashboard:
+    build:
+      context: ./services/dashboard
+    depends_on:
+      armada-daemon:
+        condition: service_healthy
+    ports:
+      - "${ARMADA_DASHBOARD_PORT:-3000}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  armada-db-data:
+  armada-models-data:
+  armada-forge-data:
+  armada-workspaces:

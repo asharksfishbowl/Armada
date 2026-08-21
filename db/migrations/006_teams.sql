@@ -10,8 +10,8 @@ BEGIN;
 
 -- Team Orchestration R1, R10 — same immutable-version semantics as Agents (R22/R23).
 CREATE TABLE teams (
-    team_id         uuid        PRIMARY KEY DEFAULT uuid_generate_v4(),
-    name            text        NOT NULL UNIQUE CHECK (name ~ '^[a-z0-9-]+$'),
+    team_id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    name            armada_name NOT NULL UNIQUE,
     current_version int         NOT NULL DEFAULT 0,
     created_at      timestamptz NOT NULL DEFAULT now(),
     updated_at      timestamptz NOT NULL DEFAULT now(),
@@ -26,7 +26,7 @@ CREATE INDEX teams_deleted_at_idx ON teams (deleted_at) WHERE deleted_at IS NULL
 -- delegation in one Team Run targets the same pinned worker versions even if the
 -- underlying Agent is edited mid-Run (edge 10).
 CREATE TABLE team_versions (
-    team_version_id uuid        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    team_version_id uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
     team_id         uuid        NOT NULL REFERENCES teams(team_id) ON DELETE CASCADE,
     version         int         NOT NULL,
     definition      jsonb       NOT NULL,

@@ -6,7 +6,7 @@ BEGIN;
 -- Training R19. `source_breakdown` records per-origin counts so R20's "zero samples from
 -- every named source" failure can name each source and its count.
 CREATE TABLE datasets (
-    dataset_id       uuid        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    dataset_id       uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
     corpus_id        uuid        REFERENCES corpora(corpus_id) ON DELETE SET NULL,
     sample_count     int         NOT NULL,
     source_breakdown jsonb       NOT NULL DEFAULT '{}'::jsonb,
@@ -20,7 +20,7 @@ CREATE TABLE datasets (
 -- (R24) and is NEVER operator-selectable (R24c) — a smoke run must stay identifiable as
 -- one forever, because R37 makes it permanently unpromotable.
 CREATE TABLE training_runs (
-    training_run_id uuid             PRIMARY KEY DEFAULT uuid_generate_v4(),
+    training_run_id uuid             PRIMARY KEY DEFAULT gen_random_uuid(),
     backend         training_backend NOT NULL,
     run_kind        run_kind         NOT NULL,
     base_model_id   text             NOT NULL,
@@ -44,7 +44,7 @@ CREATE INDEX training_runs_started_at_idx ON training_runs (started_at DESC);
 -- to keep serving after its Corpus is deleted, and its ModelBinding tag embeds the name
 -- verbatim. It carries the literal 'base' when the dataset had corpus_id: null.
 CREATE TABLE adapters (
-    adapter_id      uuid           PRIMARY KEY DEFAULT uuid_generate_v4(),
+    adapter_id      uuid           PRIMARY KEY DEFAULT gen_random_uuid(),
     training_run_id uuid           NOT NULL REFERENCES training_runs(training_run_id),
     base_model_id   text           NOT NULL,
     corpus_name     text           NOT NULL,
@@ -70,7 +70,7 @@ CREATE INDEX adapters_created_at_idx ON adapters (created_at DESC);
 -- R35: an absent judgement is not a failing judgement, so a gate that did not complete
 -- leaves the Adapter at pending_eval rather than rejected.
 CREATE TABLE evaluations (
-    evaluation_id     uuid        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    evaluation_id     uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
     adapter_id        uuid        NOT NULL REFERENCES adapters(adapter_id) ON DELETE CASCADE,
     mode              eval_mode   NOT NULL,
     candidate_scores  jsonb       NOT NULL DEFAULT '{}'::jsonb,
@@ -92,7 +92,7 @@ CREATE INDEX evaluations_adapter_id_idx ON evaluations (adapter_id);
 -- Training R32. Base bindings (R4a) carry adapter_id NULL, version NULL, and
 -- corpus_name 'base'. Promoted-Adapter bindings carry all three.
 CREATE TABLE model_bindings (
-    binding_id     uuid           PRIMARY KEY DEFAULT uuid_generate_v4(),
+    binding_id     uuid           PRIMARY KEY DEFAULT gen_random_uuid(),
     tag            text           NOT NULL UNIQUE,
     base_model_id  text           NOT NULL,
     corpus_name    text           NOT NULL,

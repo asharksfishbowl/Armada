@@ -32,10 +32,28 @@ applied=$(
         'SELECT version FROM schema_migrations' 2>/dev/null || true
 )
 
-for file in "$MIGRATIONS_DIR"/*.sql; do
-    [ -e "$file" ] || { echo "apply-migrations: no migrations found in $MIGRATIONS_DIR" >&2; exit 1; }
+# Unmatched glob check, hoisted: it can only be meaningful before the first iteration.
+set -- "$MIGRATIONS_DIR"/*.sql
+[ -e "$1" ] || { echo "apply-migrations: no migrations found in $MIGRATIONS_DIR" >&2; exit 1; }
 
+for file in "$@"; do
     version=$(basename "$file" .sql)
+
+    # The version is derived from the FILENAME here, but each migration also records
+    # itself with a hardcoded `INSERT INTO schema_migrations ... VALUES ('...')`. If those
+    # two ever disagree, this script marks a migration unapplied forever: it re-runs on
+    # every boot, fails at the first CREATE TABLE, and armada-migrate never completes —
+    # which blocks forge and daemon behind `service_completed_successfully`.
+    #
+    # Not hypothetical: roadmap F4 renumbered 004 and 005 past each other, which is exactly
+    # the edit that desynchronizes them. Fail loudly and immediately instead.
+    if ! grep -q "INSERT INTO schema_migrations (version) VALUES ('$version')" "$file"; then
+        echo "apply-migrations: $file does not record itself as '$version'." >&2
+        echo "  Every migration must end with:" >&2
+        echo "    INSERT INTO schema_migrations (version) VALUES ('$version');" >&2
+        echo "  A mismatch would re-apply this migration on every startup." >&2
+        exit 1
+    fi
 
     if echo "$applied" | grep -qx "$version"; then
         echo "apply-migrations: skip $version (already applied)"

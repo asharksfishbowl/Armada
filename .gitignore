@@ -10,3 +10,14 @@ transcripts/
 design-references/*
 !design-references/.gitkeep
 !design-references/README.md
+
+# Build output and dependencies
+node_modules/
+dist/
+__pycache__/
+*.py[cod]
+.venv/
+
+# Local Compose overrides and environment
+.env
+docker-compose.override.yml

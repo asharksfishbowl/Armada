@@ -1,14 +1,25 @@
 # Model endpoint and request scheduling — Agent Runtime R16, R20-R22, R28.
 
-# The OpenAI-compatible endpoint every ModelBinding is addressed through.
-# Defaults to the armada-models service; nothing here reaches a paid provider.
-# INVARIANT 7 (zero external spend): pointing this at a hosted API is an explicit
-# operator act, never a default.
-endpoint:
-  base_url: http://armada-models:11434/v1
-  # Ollama ignores the key, but the OpenAI client library requires the header to exist.
-  api_key_env: ARMADA_MODELS_API_KEY
-  request_timeout_seconds: 600
+# ── Backend endpoints (Training R1b) ─────────────────────────────────────────
+# Maps a `backend` name from config/base-models.yaml to the base URL that serves it.
+#
+# THIS MAPPING IS WHY NO DEPLOYMENT URL IS EVER WRITTEN TO THE DATABASE. A ModelBinding
+# stores a logical `tag` and its entry's `backend`; the URL is resolved here at request
+# time. Moving armada-models to a different host is a change to this file alone — no
+# migration, no rewrite of `model_bindings`, no change to GET /models/bindings.
+#
+# `ollama` is the only accepted backend (R1b). A second inference server adds a key here
+# and a value to the accepted set in armada_forge/config.py; nothing in the registry,
+# promotion path, or evaluation gate changes.
+#
+# INVARIANT 7 (zero external spend): every URL below points inside the Compose network.
+# Pointing one at a hosted API is an explicit operator act, never a default.
+backends:
+  ollama:
+    base_url: http://armada-models:11434/v1
+    # Ollama ignores the key, but the OpenAI client library requires the header to exist.
+    api_key_env: ARMADA_MODELS_API_KEY
+    request_timeout_seconds: 600
 
 # ── Request scheduling (R20-R22) ─────────────────────────────────────────────
 # Every model request routes through the scheduler. Admission is EVENT-DRIVEN on request

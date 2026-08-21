@@ -22,6 +22,10 @@ COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build
 
+# Drop devDependencies in place so the runtime stage copies a production tree rather than
+# resolving and installing everything a second time.
+RUN npm prune --omit=dev
+
 
 FROM node:22-bookworm-slim
 
@@ -36,9 +40,7 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-RUN npm install --omit=dev --no-audit --no-fund \
-    && npm cache clean --force
-
+COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 
 # The daemon needs the host Docker socket, which is root-owned, so this process runs as

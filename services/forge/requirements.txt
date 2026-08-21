@@ -1,0 +1,21 @@
+# armada-forge runtime dependencies — Phase 0 skeleton.
+#
+# CPU-ONLY. Nothing here requires a GPU to install or import, which is a platform-wide
+# non-goal ("no GPU-required code path in any service's default configuration").
+#
+# Deliberately minimal at Phase 0. The heavy dependencies arrive with the phases that
+# actually use them, so a Phase 0 image stays small and fast to rebuild:
+#
+#   Phase 1  sentence-transformers + torch (CPU wheel) for bge-small embedding,
+#            GitPython and BeautifulSoup for Source fetching, pypdf for extraction.
+#            Roadmap F7: the bge-small weights are BAKED IN at build time and
+#            HF_HUB_OFFLINE=1 is set at runtime, so a missing cache fails loudly rather
+#            than silently reaching out to HuggingFace and failing the blocked-egress test.
+#   Phase 7  transformers, peft, trl, datasets for LoRA SFT, plus in-process candidate
+#            generation and perplexity (roadmap F1/F2). Roadmap F6: llama.cpp's
+#            convert_hf_to_gguf.py and llama-quantize are baked in for GGUF export.
+
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+psycopg[binary]==3.2.3
+pyyaml==6.0.2

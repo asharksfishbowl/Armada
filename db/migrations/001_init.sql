@@ -12,9 +12,12 @@ BEGIN;
 
 -- pgvector for chunk embeddings (Training R13), pg_trgm alongside the GIN tsvector
 -- index for the full-text half of hybrid retrieval (Runtime R41).
+--
+-- No uuid-ossp: Postgres 16 has gen_random_uuid() in core, so every primary key below
+-- defaults from core rather than from an extension we would otherwise have to keep
+-- installed for one function.
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- ── Migration bookkeeping ────────────────────────────────────────────────────
 -- Every migration file records itself here in its own transaction. apply-migrations.sh
@@ -24,6 +27,19 @@ CREATE TABLE schema_migrations (
     version     text        PRIMARY KEY,
     applied_at  timestamptz NOT NULL DEFAULT now()
 );
+
+-- ── Shared domains ───────────────────────────────────────────────────────────
+
+-- INVARIANT 4 — Corpora, Agents, and Teams are all referenced by `name`, and every one
+-- of those names is constrained identically. Declaring the rule ONCE means relaxing it
+-- later (underscores, a length bound) is one ALTER DOMAIN rather than three CHECK
+-- constraints that must be kept in lockstep.
+--
+-- Skew between those three would be nastier than it looks: a Corpus accepting a name an
+-- Agent definition rejects surfaces as an Agent failing validation against a Corpus that
+-- visibly exists, which reads as a bug in the reference rather than in the schema.
+CREATE DOMAIN armada_name AS text
+    CHECK (VALUE ~ '^[a-z0-9-]+$');
 
 -- ── Shared enum types ────────────────────────────────────────────────────────
 

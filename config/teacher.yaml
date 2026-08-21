@@ -32,8 +32,18 @@ provider: none
 
 # Used when provider is `local` or `remote`.
 endpoint:
-  base_url: http://armada-models:11434/v1
+  # provider: local — resolved through config/models.yaml's `backends` map by NAME, not
+  # by URL. Duplicating the base_url here would quietly break models.yaml's promise that
+  # moving armada-models is a change to that file alone: an operator would edit it, this
+  # copy would keep pointing at the old host, and the failure would surface much later
+  # during distillation or a judge-mode gate.
+  backend: ollama
+  # A base-models.yaml `id`, consistent with how Agents reference models (invariant 4).
   model: qwen3-4b-instruct
+
+  # provider: remote — the ONLY setting in the platform that can incur spend. Ignored
+  # entirely while provider is `local` or `none`.
+  base_url: https://api.example-teacher-provider.com/v1
   # INVARIANT 8 — a variable NAME, never a value. Nothing reads a credential from this
   # file, and a value written here would be committed to the repository.
   api_key_env: ARMADA_TEACHER_API_KEY

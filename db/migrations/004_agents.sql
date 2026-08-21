@@ -10,8 +10,8 @@ BEGIN;
 -- shared by API-created and file-loaded Agents (R32) — a file whose name matches an
 -- API-created Agent creates a new version of that same Agent rather than a second one.
 CREATE TABLE agents (
-    agent_id        uuid        PRIMARY KEY DEFAULT uuid_generate_v4(),
-    name            text        NOT NULL UNIQUE CHECK (name ~ '^[a-z0-9-]+$'),
+    agent_id        uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    name            armada_name NOT NULL UNIQUE,
     current_version int         NOT NULL DEFAULT 0,
     created_at      timestamptz NOT NULL DEFAULT now(),
     updated_at      timestamptz NOT NULL DEFAULT now(),
@@ -28,7 +28,7 @@ CREATE INDEX agents_deleted_at_idx ON agents (deleted_at) WHERE deleted_at IS NU
 -- post-denied tool list, effective budgets, effective sandbox values, and warnings.
 -- A Run executes against this snapshot and never re-resolves (Runtime R17).
 CREATE TABLE agent_versions (
-    agent_version_id uuid        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    agent_version_id uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
     agent_id         uuid        NOT NULL REFERENCES agents(agent_id) ON DELETE CASCADE,
     version          int         NOT NULL,
     definition       jsonb       NOT NULL,

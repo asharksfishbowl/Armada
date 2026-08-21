@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<!--
+  Phase 0 placeholder. Replaced in Phase 8 by the built React application.
+
+  The colours below are lifted from specs/dashboard/design-dashboard.md so this page does
+  not read as a different product from the one that replaces it. The design spec ships
+  exactly one theme, dark, with no light theme and no prefers-color-scheme branch
+  (Requirement 1) — rationale: a single-operator local ops console gains no user from a
+  second theme and doubles both the token surface and the visual QA matrix.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Armada</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --surface-0: #0b0d10;
+        --surface-2: #16191f;
+        --text-primary: #e6e9ef;
+        --text-muted: #8b93a1;
+        --border: #262b33;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: var(--surface-0);
+        color: var(--text-primary);
+        font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      main {
+        max-width: 44rem;
+        padding: 2.5rem;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--surface-2);
+      }
+      h1 { margin: 0 0 0.25rem; font-size: 1.4rem; letter-spacing: -0.01em; }
+      p  { margin: 0.75rem 0 0; color: var(--text-muted); }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.9em;
+        color: var(--text-primary);
+      }
+      ul { margin: 0.75rem 0 0; padding-left: 1.1rem; color: var(--text-muted); }
+      li { margin: 0.3rem 0; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Armada</h1>
+      <p>
+        The dashboard is a Phase 0 placeholder. Its surfaces — Corpora, Training, Models,
+        Agents, Teams, and Runs — are built in Phase 8 against the locked design spec.
+      </p>
+      <p>The services behind it are reachable now:</p>
+      <ul>
+        <li><code>armada-daemon</code> — <code>GET /api/health</code> on port 8080</li>
+        <li><code>armada-forge</code> — <code>GET /health</code> on port 8000</li>
+        <li><code>armada-models</code> — Ollama on port 11434</li>
+      </ul>
+      <p>
+        See <code>docs/getting-started.md</code> for the fresh-install walkthrough,
+        including the first-boot model-pull cost.
+      </p>
+    </main>
+  </body>
+</html>

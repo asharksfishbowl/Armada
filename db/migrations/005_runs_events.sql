@@ -13,7 +13,7 @@ BEGIN;
 
 -- Runtime R53a.
 CREATE TABLE runs (
-    run_id           uuid        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    run_id           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- R53b — written at Run creation, NEVER updated. The only link between a Run and the
     -- definition that produced it, and what makes a Run reproducible (invariant 2).
@@ -71,7 +71,7 @@ CREATE INDEX runs_started_at_idx       ON runs (started_at DESC, run_id DESC);
 
 -- Runtime R54. APPEND-ONLY (invariant 5) — enforced by trigger below, not by convention.
 CREATE TABLE events (
-    event_id   uuid        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    event_id   uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
     run_id     uuid        NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
     seq        bigint      NOT NULL,
     type       event_type  NOT NULL,
@@ -81,9 +81,10 @@ CREATE TABLE events (
 
 -- R54 — gapless and monotonic PER RUN. The unique constraint is the backstop that makes
 -- a duplicate seq a database error rather than a silently corrupted stream.
+-- This unique index also serves R6's ordered replay: a WebSocket subscriber reads
+-- (run_id, seq) ascending, which is exactly its key order, so no second index is needed.
 CREATE UNIQUE INDEX events_seq_per_run_idx ON events (run_id, seq);
-CREATE INDEX events_run_id_seq_idx ON events (run_id, seq);
-CREATE INDEX events_type_idx       ON events (type);
+CREATE INDEX events_type_idx ON events (type);
 
 -- ── Invariant 5: append-only, enforced ───────────────────────────────────────
 -- "No code path updates or deletes an Event." A trigger makes that true of every code

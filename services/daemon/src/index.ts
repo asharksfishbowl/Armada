@@ -90,11 +90,7 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
   sendJson(res, 404, { error: 'not_found', path: req.url ?? '' });
 });
 
-server.listen(PORT, () => {
-  // DEBUG
-  console.log('🚀 DAEMON_LISTENING:', { port: PORT, version: VERSION, health: '/api/health' });
-
-});
+server.listen(PORT);
 
 /**
  * Compose sends SIGTERM on `docker compose down`. Close the listener and drain the pool
@@ -103,14 +99,11 @@ server.listen(PORT, () => {
  * Phase 2 extends this to release sandbox containers — a daemon that exits without
  * releasing leaves orphans, which is why R48 also requires cleanup on the next startup.
  */
-function shutdown(signal: string): void {
-  // DEBUG
-  console.log('🏁 DAEMON_SHUTDOWN:', { signal });
-
+function shutdown(): void {
   server.close(() => {
     void pool.end().then(() => process.exit(0));
   });
 }
 
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
