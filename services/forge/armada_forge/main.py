@@ -32,7 +32,7 @@ from typing import Any, AsyncIterator
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
-from armada_forge import corpora, db
+from armada_forge import corpora, db, embed_api
 from armada_forge.config import ArmadaConfig, load_config_or_exit
 from armada_forge.progress import hub
 
@@ -89,6 +89,9 @@ app = FastAPI(
 )
 
 app.include_router(corpora.router)
+# POST /embed — the daemon calls this at agent time for R41 query vectors. Forge owns the
+# embedding model (platform boundary 1); this returns a vector, never a retrieval.
+app.include_router(embed_api.router)
 
 
 @app.get("/health")

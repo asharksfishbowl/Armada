@@ -13,11 +13,11 @@
  * non-zero (R14) instead of producing a daemon that serves 503 forever and looks like a
  * database problem.
  *
- * Placeholder implementations: P3 needs a real EventSink, and the other four interfaces
- * must be REGISTERED for the Kernel to consider itself ready (R14) even though nothing
- * calls them until later phases. They are registered as explicit not-implemented stubs
- * that THROW when invoked, rather than as silent no-ops — a stub that quietly returns
- * nothing would surface in P7 as an empty tool list rather than as a missing plugin.
+ * EventSink (P3) and RetrievalProvider (P6) are real. The remaining three must still be
+ * REGISTERED for the Kernel to consider itself ready (R14) even though nothing calls them
+ * until later phases. They are registered as explicit not-implemented stubs that THROW
+ * when invoked, rather than as silent no-ops — a stub that quietly returns nothing would
+ * surface later as an empty tool list rather than as a missing plugin.
  */
 
 import { Pool } from 'pg';
@@ -26,6 +26,8 @@ import { parse as parseYaml } from 'yaml';
 import { Kernel } from './kernel/kernel.js';
 import { PluginConfigError, type FactoryTables } from './kernel/plugin-registry.js';
 import { PostgresEventSink, collectCredentialEnvNames } from './events/event-log.js';
+import { PgVectorRetrievalProvider, DEFAULT_RETRIEVAL_OPTIONS } from './retrieval/pgvector-provider.js';
+import { createEmbedClient } from './retrieval/embed-client.js';
 import { createGateway } from './gateway/server.js';
 import { PeerProbe } from './gateway/routes/health.js';
 
@@ -103,10 +105,21 @@ const factories: FactoryTables = {
     }),
   },
   RetrievalProvider: {
-    PgVectorRetrievalProvider: () => ({
-      name: 'PgVectorRetrievalProvider',
-      query: () => notImplemented('RetrievalProvider.query', 'P6'),
-    }),
+    // Real from P6. The query vector comes from forge (platform boundary 1) — the daemon
+    // has no embedding model, and a second copy could drift out of sync with the one that
+    // indexed the corpus, making query and indexed vectors incomparable.
+    PgVectorRetrievalProvider: (deps) =>
+      new PgVectorRetrievalProvider(
+        deps.pool,
+        createEmbedClient({ forgeUrl: FORGE_URL }),
+        {
+          ...DEFAULT_RETRIEVAL_OPTIONS,
+          rrfK: Number(
+            (deps.config['retrieval'] as { rrf_k?: number } | undefined)?.rrf_k ??
+              DEFAULT_RETRIEVAL_OPTIONS.rrfK,
+          ),
+        },
+      ),
   },
   EventSink: {
     // The one real implementation in P3. Invariant 5 lives here.
