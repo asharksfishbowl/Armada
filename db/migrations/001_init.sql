@@ -69,6 +69,19 @@ CREATE TYPE adapter_status AS ENUM ('pending_eval', 'promoted', 'rejected');
 -- Training R32 — `missing` means promoted in the DB but absent from armada-models (edge 15).
 CREATE TYPE binding_status AS ENUM ('promoted', 'retired', 'missing');
 
+-- Training R4d — materialization is SEPARATE from registration (R4c). A binding may be
+-- `promoted` and unmaterialized at the same time, and on a fresh installation that is the
+-- normal state of most of the shortlist: registering writes a record, materializing
+-- transfers weights. Keeping them separate is what lets a first `docker compose up`
+-- transfer zero model bytes instead of 10-15 GB.
+CREATE TYPE materialization_status AS ENUM (
+    'absent',        -- no weights, never attempted (or corrected back down by R4h)
+    'pending',       -- accepted, not yet started
+    'materializing', -- transfer in flight
+    'present',       -- weights available and the binding can answer
+    'failed'         -- transfer attempted and did not complete
+);
+
 -- Training R34 — gate mode. `mechanical` is the default and has no teacher dependency.
 CREATE TYPE eval_mode AS ENUM ('mechanical', 'judge');
 

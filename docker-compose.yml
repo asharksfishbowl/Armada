@@ -76,7 +76,12 @@ services:
   # ── Ollama ─────────────────────────────────────────────────────────────────
   # OpenAI-compatible inference for every registered ModelBinding.
   armada-models:
-    image: ollama/ollama:latest
+    # Custom image rather than ollama/ollama directly: R4g bakes the smoke_test model in,
+    # so it is materialized: true from first boot and both the smoke training path and a
+    # first Agent Run work offline. The other four shortlist entries register
+    # unmaterialized and are pulled on demand via POST /models/bindings/{tag}/materialize.
+    build:
+      context: ./services/models
     environment:
       # ROADMAP F12 — these MUST agree with config/models.yaml's `scheduling` block.
       # The daemon enforces max_concurrent_per_tag and max_concurrent_total, but Ollama
@@ -91,6 +96,13 @@ services:
       OLLAMA_HOST: 0.0.0.0
     volumes:
       - armada-models-data:/root/.ollama
+    # Req 17 — a bound the daemon's scheduler can reason about. Without it, concurrency
+    # limits in config/models.yaml describe request counts while the real constraint is
+    # RAM, and the two disagree silently under load.
+    deploy:
+      resources:
+        limits:
+          memory: ${ARMADA_MODELS_MEMORY:-8g}
     healthcheck:
       test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
       interval: 10s
@@ -119,9 +131,18 @@ services:
       ARMADA_TEACHER_API_KEY: ${ARMADA_TEACHER_API_KEY:-}
       ARMADA_TRAINING_API_KEY: ${ARMADA_TRAINING_API_KEY:-}
       ARMADA_MODELS_API_KEY: ${ARMADA_MODELS_API_KEY:-}
+      # Forge registers bindings with the model server and reconciles materialization
+      # against it at startup (R4h) — cross-service boundary 2.
+      ARMADA_MODELS_URL: http://armada-models:11434
     volumes:
       - ./config:/config:ro
       - armada-forge-data:/data
+    # Req 17 — forge loads the embedding model and, from P11, merges adapters. An
+    # unbounded container competes with armada-models for the same host RAM.
+    deploy:
+      resources:
+        limits:
+          memory: ${ARMADA_FORGE_MEMORY:-6g}
     ports:
       - "${ARMADA_FORGE_PORT:-8000}:8000"
     healthcheck:

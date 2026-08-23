@@ -101,8 +101,26 @@ CREATE TABLE model_bindings (
     context_window int            NOT NULL,
     tool_format    tool_format    NOT NULL,
     status         binding_status NOT NULL DEFAULT 'promoted',
+
+    -- Training R4c/R4d — REGISTRATION IS NOT MATERIALIZATION. Registering writes this
+    -- row; materializing transfers the weights. Defaulting to false/absent is what makes
+    -- a first startup register all five shortlist entries while transferring zero model
+    -- bytes (R4a). `backend` is a LOGICAL name resolved through config/models.yaml, so no
+    -- deployment URL is ever persisted here (R1b).
+    backend        text           NOT NULL DEFAULT 'ollama',
+    materialized   boolean        NOT NULL DEFAULT false,
+    materialization_status materialization_status NOT NULL DEFAULT 'absent',
+    materialization_error  text,
+
     created_at     timestamptz    NOT NULL DEFAULT now(),
     updated_at     timestamptz    NOT NULL DEFAULT now(),
+
+    -- R4d made structural: `materialized` is exactly `materialization_status = present`.
+    -- Two fields expressing one fact can disagree, and a binding claiming materialized
+    -- while its status says otherwise is precisely the stale-true state R4h exists to
+    -- correct. The constraint makes that unrepresentable rather than merely unlikely.
+    CONSTRAINT model_bindings_materialized_matches_status
+        CHECK (materialized = (materialization_status = 'present')),
 
     -- R4a — a base binding is exactly the one with no Adapter behind it. Keeping the two
     -- shapes distinguishable in the schema is what lets reconciliation (R4b) retire a base
