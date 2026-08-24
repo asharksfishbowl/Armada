@@ -94,7 +94,9 @@ def check_capacity(entry: models.ShortlistEntry, capacity: Capacity) -> str | No
             f"requires min_ram_gb {entry.min_ram_gb}, "
             f"host has {capacity.ram_available_gb:.1f} GB available"
         )
-    if entry.min_disk_gb and capacity.disk_free_gb < entry.min_disk_gb:
+    # Presence rather than truthiness: 0 is falsy, so a truthiness test silently
+    # skips the whole disk check for a zero threshold instead of applying it.
+    if entry.min_disk_gb is not None and capacity.disk_free_gb < entry.min_disk_gb:
         return (
             f"insufficient disk to materialize `{entry.id}`: "
             f"requires min_disk_gb {entry.min_disk_gb}, "

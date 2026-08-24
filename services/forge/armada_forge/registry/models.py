@@ -45,10 +45,11 @@ class ShortlistEntry:
             context_window=int(raw["context_window"]),
             tool_format=raw["tool_format"],
             min_ram_gb=int(raw["min_ram_gb"]),
-            # min_disk_gb arrived with the D1 correction; tolerate its absence rather than
-            # crash a startup on an operator's older appended entry, and treat unknown as
-            # zero so the capacity check simply does not gate on it.
-            min_disk_gb=int(raw.get("min_disk_gb", 0)),
+            # Required, like min_ram_gb. NO default: a defaulted 0 would silently disable
+            # the disk guard for that entry, which is exactly the decorative-threshold
+            # failure D1 removed for min_ram_gb. config.py rejects an entry missing it
+            # before this code runs.
+            min_disk_gb=int(raw["min_disk_gb"]),
             smoke_test=bool(raw.get("smoke_test", False)),
         )
 

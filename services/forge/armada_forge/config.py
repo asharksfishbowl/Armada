@@ -36,6 +36,7 @@ BASE_MODEL_REQUIRED_KEYS: frozenset[str] = frozenset(
         "tool_format",
         "quantization",
         "min_ram_gb",
+        "min_disk_gb",
         "trainable",
         "lora_target_modules",
         "smoke_test",
@@ -175,6 +176,18 @@ def _validate_base_models(raw: dict[str, Any], errors: list[str]) -> list[dict[s
                 # make two different models share one tag.
                 errors.append(f"config/base-models.yaml: duplicate id `{entry_id}`")
             seen_ids.add(entry_id)
+
+        # R4f's capacity guards are only meaningful above zero: a threshold of 0 or less
+        # can never refuse anything, which is how min_ram_gb was decorative before D1.
+        # Validated for BOTH thresholds together — fixing one and not the other would
+        # leave the same silent hole under a different key.
+        for threshold in ("min_ram_gb", "min_disk_gb"):
+            value = entry.get(threshold)
+            if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 1):
+                errors.append(
+                    f"{where}: `{threshold}` is {value!r}; it must be an integer of at "
+                    "least 1, or its capacity check can never refuse anything"
+                )
 
         # Only check a value that is present; a missing key is already reported above as
         # missing, and reporting it twice would bury the actionable message.
