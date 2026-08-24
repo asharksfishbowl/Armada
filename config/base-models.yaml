@@ -28,7 +28,8 @@
 #   chat_template        one of qwen3, llama3, gemma3
 #   tool_format          one of json_schema, hermes
 #   quantization         string — applied on GGUF export at promotion (R31)
-#   min_ram_gb           int — compared against host memory at startup, warns only (F11)
+#   min_ram_gb           int — REFUSES materialization when host memory is below it (R4f)
+#   min_disk_gb          int — REFUSES materialization when host free disk is below it (R4f)
 #   trainable            bool — false rejects a training run naming the constraint (edge 7)
 #   lora_target_modules  list of strings
 #   smoke_test           bool — exactly one entry is true
@@ -45,6 +46,7 @@ models:
     tool_format: hermes
     quantization: Q4_K_M
     min_ram_gb: 2
+    min_disk_gb: 2
     trainable: true
     lora_target_modules:
       - q_proj
@@ -65,6 +67,7 @@ models:
     tool_format: hermes
     quantization: Q4_K_M
     min_ram_gb: 4
+    min_disk_gb: 3
     trainable: true
     lora_target_modules:
       - q_proj
@@ -85,6 +88,7 @@ models:
     tool_format: hermes
     quantization: Q4_K_M
     min_ram_gb: 6
+    min_disk_gb: 5
     trainable: true
     lora_target_modules:
       - q_proj
@@ -105,6 +109,7 @@ models:
     tool_format: json_schema
     quantization: Q4_K_M
     min_ram_gb: 5
+    min_disk_gb: 4
     trainable: true
     lora_target_modules:
       - q_proj
@@ -125,6 +130,7 @@ models:
     tool_format: json_schema
     quantization: Q4_K_M
     min_ram_gb: 6
+    min_disk_gb: 6
     trainable: true
     lora_target_modules:
       - q_proj
