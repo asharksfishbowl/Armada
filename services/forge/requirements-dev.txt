@@ -1,0 +1,15 @@
+# Development and test dependencies for armada-forge.
+#
+# SEPARATE FROM requirements.txt ON PURPOSE. That file is what the Dockerfile installs, and
+# it is runtime-only — a test runner has no business in a shipped image. Install these
+# locally with:
+#
+#   pip install -r requirements.txt -r requirements-dev.txt
+#
+# Rule 9: a phase with no tests is not done. `pytest` from services/forge must exit
+# non-zero on failure, which is what makes every test below it meaningful.
+
+-r requirements.txt
+
+pytest==8.3.4
+pytest-asyncio==0.25.0

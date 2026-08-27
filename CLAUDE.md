@@ -129,7 +129,7 @@ the pipeline when a task first needs one.
 | `armada-db` | `pgvector/pgvector:pg16`; `gen_random_uuid()` from core, not `uuid-ossp` | Phase 0 |
 | Migrations | Plain SQL under `db/migrations/`, applied by `db/apply-migrations.sh`, tracked in `schema_migrations` | Phase 0 |
 | `armada-dashboard` | **Undecided.** Phase 0 ships an nginx static placeholder precisely so Phase 8 can pick the bundler and state library | — |
-| Test framework | **Undecided** for both services | — |
+| Test framework | forge → `pytest` (`requirements-dev.txt`); daemon → `node --test` | Rule 9 / ISSUE #7 |
 | Linter / formatter | **Undecided** for both services | — |
 
 ### Conventions that are already load-bearing
@@ -144,6 +144,16 @@ the pipeline when a task first needs one.
   and ends with `INSERT INTO schema_migrations`. `apply-migrations.sh` refuses to run a
   file whose recorded version disagrees with its filename — that skew would silently
   re-apply a migration on every boot.
+- **Tests land with the phase — a phase with no tests is not done.** `pytest` from
+  `services/forge`, `npm test` from `services/daemon`. Both exit non-zero on failure.
+  Unit tests must not need Docker, Postgres, or armada-models; anything that does is
+  marked `@pytest.mark.integration` (forge) or noted and left out (daemon), so units can
+  run on every push.
+- **Daemon tests COMPILE before running** (`tsc && node --test "dist/__tests__/*.test.js"`).
+  Node 22 can run `.ts` directly via type stripping, but strip-only mode rejects
+  TypeScript *parameter properties* (`constructor(private readonly x: T)`), which this
+  codebase uses in eight files. Compiling first also type-checks the tests. Do not switch
+  to running `.ts` directly without removing those first.
 - **`console.log` in TypeScript must follow the repo's debug format** (a hook enforces it):
   blank line, `// DEBUG`, `console.log('🚀 LABEL:', { data })`, blank line. Only certain
   emoji are accepted.
