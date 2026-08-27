@@ -238,6 +238,10 @@ Armada is being built in phases. What exists today:
 | `GET /config/capabilities` | ✅ |
 | Daemon: single-port gateway, plugin kernel, event log, `GET /api/health` | ✅ |
 | Run event stream over `ws://…:8080/ws` with ordered replay | ✅ |
+| Model registry, base bindings, `POST /models/bindings/{tag}/materialize` | ✅ |
+| Agent definitions — schema, validation, versioning, `agents/` file loader | ✅ |
+| Retrieval — hybrid pgvector + full-text, `search_knowledge` | ✅ |
+| Sandboxes and the five built-in tools | ✅ |
 | Base ModelBinding registration and materialization | ⏳ blocked |
 | Agent definition, agent loop, sandboxes, retrieval, teams, training, dashboard | ⏳ later phases |
 
@@ -261,6 +265,31 @@ not stop resolving because its training corpus was cleaned up.
 `eval_mode`, `local_backend_mode` — and nothing else. No credentials, no endpoints, no
 environment variable names. The dashboard uses it to render disabled-with-reason instead
 of enabled-and-guessing.
+
+## Sandboxes and the workspace root
+
+Every Run gets its own container. It runs as a **non-root user with all Linux capabilities
+dropped, no network, and no access to the Docker socket** — the daemon holds the socket to
+create sandboxes as sibling containers, and that mount is never propagated into one. A
+sandbox that could reach the socket could provision an unconstrained container and escape.
+
+Only two paths exist inside a sandbox: `/workspace` (your bind-mounted workspace) and
+`/armada`, a small writable tmpfs that holds oversize tool output and Code-mode artifacts.
+`/armada` stays writable even when the profile sets `read_only_root: true`, and it is
+discarded with the container.
+
+**`ARMADA_WORKSPACE_ROOT`** (default `/var/lib/armada/workspaces`) is bind-mounted into the
+daemon **at the same path it occupies on the host**, and every `workspace_path` must
+resolve beneath it. The identical path on both sides is required rather than tidy: when the
+daemon creates a sandbox, Docker resolves the mount against the *host*, so a mismatched
+path would mean the daemon verifies one directory while Docker mounts another. It is also
+what lets the daemon check a workspace exists at all — it runs in a container and cannot
+see arbitrary host paths.
+
+**`network: egress_allowlist` is refused at startup, not downgraded.** Docker has no
+per-container host allowlist; it needs a proxy subsystem, which is a later phase. A profile
+declaring it fails config load naming the mode — because a profile that asked for filtered
+egress and quietly received none would still *look* like it was filtering.
 
 ## Configuration reference
 

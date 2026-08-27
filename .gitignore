@@ -24,3 +24,6 @@ docker-compose.override.yml
 
 # Test runner caches
 .pytest_cache/
+design-references/*
+!design-references/.gitkeep
+!design-references/README.md

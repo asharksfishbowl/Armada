@@ -187,6 +187,9 @@ services:
       ARMADA_VERSION: ${ARMADA_VERSION:-0.1.0}
       ARMADA_FORGE_URL: http://armada-forge:8000
       ARMADA_MODELS_API_KEY: ${ARMADA_MODELS_API_KEY:-}
+      # R45c — the shared workspace root. Bind-mounted below at the SAME path it occupies
+      # on the host, which is what makes edge 7 checkable and sandbox mounts resolvable.
+      ARMADA_WORKSPACE_ROOT: ${ARMADA_WORKSPACE_ROOT:-/var/lib/armada/workspaces}
     volumes:
       - ./config:/config:ro
       - ./agents:/agents:ro
@@ -208,9 +211,18 @@ services:
       # Anyone reviewing this: a sandbox with the socket could provision an unconstrained
       # container and escape. That is why the mount appears here and nowhere else.
       - /var/run/docker.sock:/var/run/docker.sock
-      # Run workspaces, bind-mounted into sandboxes at /workspace (R45). Apart from this
-      # and the per-container /armada tmpfs, no host path is ever mounted into a sandbox.
-      - armada-workspaces:/workspaces
+      # R45c — THE SHARED WORKSPACE ROOT, MOUNTED AT THE SAME PATH ON BOTH SIDES.
+      #
+      # The identical-path form is required, not cosmetic. When the daemon creates a
+      # sandbox it passes `--volume <workspace>:/workspace`, and DOCKER RESOLVES THAT
+      # AGAINST THE HOST, not against the daemon's filesystem. A named volume or a
+      # different in-container path would mean the daemon verifies one path while Docker
+      # mounts another — every sandbox would get the wrong directory, or none.
+      #
+      # Mounting one shared root rather than per-Run paths is also what makes edge 7
+      # implementable: the daemon checks a path it has actually mounted instead of
+      # stat-ing an arbitrary host path it cannot see.
+      - ${ARMADA_WORKSPACE_ROOT:-/var/lib/armada/workspaces}:${ARMADA_WORKSPACE_ROOT:-/var/lib/armada/workspaces}
     ports:
       # R1 — ONE port serving both /api/* and /ws.
       - "${ARMADA_PORT:-8080}:8080"
@@ -245,4 +257,3 @@ volumes:
   armada-db-data:
   armada-models-data:
   armada-forge-data:
-  armada-workspaces:

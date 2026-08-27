@@ -49,15 +49,17 @@
 
 ### Model Adapter
 16. `OpenAICompatibleAdapter` is the only shipped `ModelAdapter`. It targets the base URL in `config/models.yaml` (default the `armada-models` service) and addresses models by ModelBinding `tag`.
-17. The Run uses the `binding_tag`, `context_window`, and `tool_format` recorded in the Agent version's `resolved_snapshot`. The daemon does not re-resolve the Agent's model reference at Run start. At Run start it performs a liveness check only: it calls `armada-forge` `GET /models/bindings` and confirms the pinned `binding_tag` is present with `status: promoted`.
+17. The Run uses the `binding_tag`, `context_window`, and `tool_format` recorded in the Agent version's `resolved_snapshot`. The daemon does not re-resolve the Agent's model reference at Run start. At Run start it performs a liveness check only: it calls `armada-forge` `GET /models/bindings` and confirms the pinned `binding_tag` is present with `status: promoted` **and `materialized: true`**.
 17a. Because bindings are pinned at Agent save time, a newly promoted Adapter does not change any existing Agent's behavior. An operator adopts a new Adapter by calling `POST /api/agents/{agent_id}/refresh-bindings`, which is owned by the Agent Definition spec and cuts a new Agent version.
 18. When the liveness check finds the pinned `binding_tag` absent, or present with `status` `retired` or `missing`, Run start fails with outcome `failed` and an error naming the tag and the observed status; no sandbox is acquired.
+18b. When the liveness check finds the pinned `binding_tag` present and `promoted` but `materialized: false`, Run start fails with outcome `failed` and an error naming the tag and directing the operator to `POST /models/bindings/{tag}/materialize`; no sandbox is acquired. A registered binding is not necessarily a servable one — `armada-forge` registers a ModelBinding row per shortlist entry at startup while materializing weights lazily, so a Run must fail fast rather than block behind a multi-gigabyte transfer.
 18a. When `armada-forge` is unreachable during the liveness check, Run start fails with outcome `failed` naming the service. The daemon does not proceed on an unverified binding.
 19. Model requests carry an `AbortSignal`. Cancelling a Run aborts the in-flight request rather than waiting for it to finish.
 
 ### Model Request Scheduling
 20. The daemon routes all model requests through a scheduler that enforces a per-tag concurrency limit read from `config/models.yaml` (`max_concurrent_per_tag`, default 1) and a global limit (`max_concurrent_total`, default 2).
-21. When a request exceeds a limit it waits in a FIFO queue for that tag. Queue admission is event-driven on request completion; the scheduler contains no timed polling and no fixed delays.
+21. When a request exceeds a limit it waits in a queue for that tag, admitted **FIFO within priority class**. Team Orchestration assigns a manager's requests a higher priority class than a worker's for the same tag, so a strict FIFO across all requests would starve a manager waiting to synthesize. Within one priority class admission is strictly FIFO. Queue admission is event-driven on request completion; the scheduler contains no timed polling and no fixed delays.
+21a. There are exactly two priority classes, `manager` and `default`. A Run acquires the `manager` class only as the manager of a Team Run; every other Run, including a child Run, uses `default`. Nothing else raises a Run's class, and a class is never raised mid-Run.
 22. Time spent queued is recorded on the resulting `model_request` Event as `queued_ms` and does not count against the Run's wall-clock budget.
 
 ### Agent Loop
@@ -100,8 +102,11 @@
 ### Sandboxing
 44. `DockerSandboxProvider` acquires one container per Run from the profile named by the Agent, defined in `config/sandbox-profiles.yaml` with fields `image`, `cpu_limit`, `memory_limit`, `network` (one of `none`, `egress_allowlist`), `allowed_hosts` (list of strings), `read_only_root` (bool), `armada_tmpfs_size` (string, default `64m`), `timeout_seconds`.
 44a. Every sandbox mounts a writable tmpfs at `/armada` sized `armada_tmpfs_size`, regardless of `read_only_root`. This is where oversize tool results (Requirement 38) and Code-mode artifacts (Requirement 27c) are written, so `read_only_root: true` never disables either mechanism. `/armada` is discarded with the container and its contents are never part of the workspace.
+45c. Every `workspace_path` resolves beneath a single **shared workspace root**, `ARMADA_WORKSPACE_ROOT`, which is bind-mounted into `armada-daemon` at the same path it occupies on the host. Requiring one root is what makes Edge Case 7 implementable: the daemon verifies a workspace by checking a path it has mounted, and Docker resolves the same path against the host when it creates the sandbox. A `workspace_path` that does not resolve beneath that root is rejected at Run start naming the root, before any container is created.
 45. The Run's `workspace_path` is bind-mounted at `/workspace` inside the container and is the container's working directory. Apart from `/workspace` and the `/armada` tmpfs, no host path is mounted.
-46. The container runs as a non-root UID, has no access to the Docker socket, and drops all Linux capabilities not required by the profile.
+45a. `armada-daemon` creates sandbox containers as **siblings**, not children, which requires the host Docker socket to be mounted into the `armada-daemon` container at `/var/run/docker.sock`. This is stated as a requirement rather than left to a Dockerfile because it is root-equivalent on the host and is the highest-privilege decision in the deployment. It violates no invariant — invariant 3 governs the sandbox boundary, and Armada's scope is single-operator on a trusted network — but it must be visible in the spec that mandates it.
+45b. `armada-daemon` fails at startup, naming the missing mount, when `/var/run/docker.sock` is absent. It does not defer the failure to the first Run.
+46. The container runs as a non-root UID, has **no** access to the Docker socket — the daemon's mount is never propagated into a sandbox — and drops all Linux capabilities not required by the profile.
 47. When `network` is `egress_allowlist`, only hosts in `allowed_hosts` are reachable; all other egress is refused.
 48. The sandbox is released and the container removed when the Run reaches any terminal outcome, including `cancelled` and process crash recovery on daemon restart.
 49. Built-in tools `shell`, `read_file`, `write_file`, and `list_dir` execute exclusively through the `Sandbox` interface and have no host filesystem access path.
@@ -120,6 +125,7 @@
 ### Event Log
 54. Events are appended to the `events` table with `event_id` (uuid), `run_id` (uuid), `seq` (bigint, monotonic and gapless per Run), `type`, `payload` (jsonb), `created_at` (timestamptz). The table is append-only; no code path updates or deletes an Event.
 55. `type` is one of: `run_start`, `user_message`, `model_request`, `model_response`, `reasoning`, `tool_call`, `tool_result`, `retrieval`, `compaction`, `mode_downgraded`, `mcp_unavailable`, `delegation`, `error`, `run_end`.
+55a. `run_start` records the full pinned execution context, so the Event log is a self-contained record of what actually ran without joining any other table: `agent_version_id`, the Agent's `name` and `version`, `binding_tag`, `context_window`, `tool_format`, `mode` (the mode actually started in, after any downgrade), `workspace_path` (nullable), the effective budgets for all four keys, and the fully-qualified granted tool list after `denied` has been applied. Because an Agent may be deleted while its historical Runs are retained, a reader of the Event log must never depend on the `agents` table still resolving.
 56. `model_request` and `model_response` Events record `tag`, `prompt_tokens`, `completion_tokens`, and `queued_ms`.
 57. `run_end` records the terminal `outcome`, the budget counters at termination, and, for `budget_exhausted`, which budget was hit.
 58. `seq` is assigned by a transactional counter per `run_id` so concurrent tool completions cannot produce duplicate or out-of-order `seq` values.
@@ -149,7 +155,7 @@
 4. When the model emits the same failing tool call with identical arguments for `no_progress_threshold` consecutive Steps, the Run terminates `no_progress` rather than looping until `max_steps`.
 5. When a tool call runs longer than the sandbox profile's `timeout_seconds`, the process is killed, a `tool_result` with `is_error: true` and `timed_out: true` is appended, and the loop continues.
 6. When the sandbox container exits unexpectedly mid-Run, the next tool dispatch fails, an `error` Event is appended, and the Run terminates `failed`. The daemon does not silently start a replacement container.
-7. When `workspace_path` does not exist on the host, Run start fails with outcome `failed` naming the path, before the container is created.
+7. When `workspace_path` does not exist on the host, Run start fails with outcome `failed` naming the path, before the container is created. The daemon **must not** verify this by `stat`: it runs in a container and cannot see an arbitrary host path. Verification is performed against the shared workspace root of Requirement 45c, which the daemon has mounted, so the check is a filesystem check against a path the daemon can actually see.
 8. When two Runs specify the same `workspace_path`, both proceed; Armada does not lock workspaces. The `run_start` Event records the path so concurrent mutation is attributable.
 9. When the bound corpus has zero chunks, retrieval returns an empty list, no retrieval block is injected, a `retrieval` Event with an empty `chunk_id` list is still appended, and the Run proceeds.
 10. When a retrieval query fails (database unreachable), an `error` Event is appended, the Step proceeds without a retrieval block, and the Run is not terminated.
@@ -200,6 +206,12 @@
 - [ ] An Agent whose model repeats one identical tool call terminates with outcome `no_progress` in exactly `no_progress_threshold` Steps.
 - [ ] Cancelling an in-flight Run terminates the container within the request and `docker ps` shows no container labelled with that `run_id`.
 - [ ] Restarting the daemon with a Run in flight marks that Run `failed` and removes its orphaned container on startup.
+- [ ] A `run_start` Event carries `agent_version_id`, agent `name` and `version`, `binding_tag`, `context_window`, `tool_format`, `mode`, `workspace_path`, all four effective budgets, and the post-`denied` tool list, and remains fully readable after its Agent is deleted.
+- [ ] Starting a Run whose pinned binding is `promoted` but `materialized: false` fails naming the tag and the materialize endpoint, and `docker ps` shows no container was created.
+- [ ] Starting `armada-daemon` without `/var/run/docker.sock` mounted fails at startup naming the mount, not at the first Run.
+- [ ] Inspecting a running sandbox shows no Docker socket inside the container while the daemon still holds its own.
+- [ ] A Run whose `workspace_path` does not resolve beneath `ARMADA_WORKSPACE_ROOT` is rejected at start naming the root, and the daemon performs no `stat` against an unmounted host path.
+- [ ] With `max_concurrent_per_tag: 1`, a queued manager request on a Team Run is admitted ahead of worker requests queued earlier for the same tag, while two requests in the same priority class are admitted in arrival order.
 - [ ] Subscribing over WebSocket after a Run completes replays every Event in `seq` order.
 - [ ] Two WebSocket clients subscribed to the same Run receive identical Event sequences.
 - [ ] An Agent bound to a corpus produces a `retrieval` Event on the first Step of each Turn and has `search_knowledge` in its tool list; an Agent with no corpus produces neither.

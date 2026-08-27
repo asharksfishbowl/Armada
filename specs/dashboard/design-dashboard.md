@@ -58,15 +58,19 @@ These four are surfacings of endpoints and flows the specs already define. Nothi
 
 | Token | Value | Use |
 |---|---|---|
-| `--surface-0` | `#0A0C10` | Application background |
-| `--surface-1` | `#10131A` | Page and panel background |
-| `--surface-2` | `#161A23` | Card, row group, table body |
-| `--surface-3` | `#1E232E` | Row hover, editor gutter |
-| `--surface-4` | `#272D3A` | Selected row, menu, popover body |
-| `--line` | `#232936` | 1px hairline |
-| `--line-strong` | `#323A4A` | Section divider |
+| `--surface-0` | `#0E0A07` | Tarred hull — application background |
+| `--surface-1` | `#17110B` | Dark oak — page and panel background |
+| `--surface-2` | `#1F1610` | Oak plank — card, row group, table body |
+| `--surface-3` | `#2B2016` | Lit plank — row hover, editor gutter |
+| `--surface-4` | `#38291C` | Selected plank — selected row, menu, popover body |
+| `--line` | `#33261B` | Grain hairline |
+| `--line-strong` | `#5A4128` | Brass-warm seam — section divider |
 
-3. The foreground text ramp is exactly three tokens: `--fg` `#E6EAF2`, `--fg-muted` `#9AA4B8`, `--fg-dim` `#6B7488`.
+3. The foreground text ramp is exactly three tokens: `--fg` `#F2E8D8` (canvas), `--fg-muted` `#B8A68C` (weathered rope), `--fg-dim` `#85735E`.
+3a. Requirements 2 and 3 are the **"Armada Oak"** surface ramp, adopted 2026-08-27 from `design-references/playground-B.html`. The motivation is stated as aesthetic rather than corrective: Armada is a fleet and the console should read as ship timber. **The amendment is scoped to exactly one layer — surface, line, and foreground.** Every status hue (Requirements 21, 26, 29), the accent and its closed use list (Requirements 4, 5), the six marks and the fill axis (Requirements 19, 20), chip anatomy (Requirement 32), the flag-chip class (Requirement 50a), the five permitted alpha uses (Requirement 32d), the motion policy (Requirements 12–17), and all geometry (Requirements 7–10) are unchanged. **The status vocabulary is bit-for-bit identical: an operator who learned it on slate has learned it on oak.**
+3b. **Brass was considered as the accent and is ruled against permanently.** `#C9A227` measures 6° from `--status-warn` `#F2B33D` on the hue wheel, where `--accent` `#4C8DFF` measures 179°. Requirement 4 selects blue specifically so the accent can never be confused with a status hue; a brass accent would render *this row is selected* and *the harness intervened* in effectively the same colour, collapsing Requirement 4's rationale and Requirement 5's premise. Brass survives as structural chrome only, in `--line-strong` `#5A4128`, which Requirement 32b permits because chrome is not status.
+3c. `--status-neutral` `#8B96AC` is deliberately left unchanged and is now the only status hue in a different temperature family from its ground. It measures 5.98:1 and 5.34:1 on oak and passes comfortably; it reads as pewter against timber. Re-hueing it would touch Requirements 21, 23a, 26, 29, and the cross-family identities of Requirement 142a, so it is out of scope for a surface-layer amendment and requires its own if ever wanted.
+3d. The `rgba(255,255,255,.04)` inner top highlight of Requirement 14 stays achromatic on the warm ground. Achromatic is the safer default, it is what the locked mock renders, and warming it would make the depth language ground-dependent for no gain.
 4. Exactly one accent colour is defined: `--accent` `#4C8DFF`, `--accent-hover` `#6FA4FF`, and `--accent-wash` = `--accent` at 12% alpha. The accent is blue specifically so that it can never be confused with any status hue (cyan, green, amber, red, violet, slate). `--accent` and `--status-live` (Requirement 21) are deliberately different blues carrying different kinds of meaning: the accent signals operator intent — what is selected, focused, or primary — while `--status-live` signals machine activity. Neither value may be set equal to the other.
 5. The accent appears on exactly these elements and nowhere else: primary buttons, the focus ring, the active navigation item, and the left edge of a selected row.
 6. Two type families are used. `Inter` for all UI text. `JetBrains Mono` for every value an operator may need to copy, diff, or transcribe: identifiers, binding tags, field paths, YAML, event payloads, and numeric counters.
@@ -124,7 +128,7 @@ These four are surfacings of endpoints and flows the specs already define. Nothi
 
 22. The rotating `◐` on a running entity is the only rotating element in the application.
 23. `incomplete` is filled because `finish(success: false)` is a verdict — the agent judged the task and reported that it did not achieve it (Agent Runtime edge 20a). `budget_exhausted` and `no_progress` are hollow because the harness stopped the run before any self-report (Agent Runtime R32, R33, edge 20d).
-23a. There is no `--status-muted` token. `incomplete`, `cancelled`, and `rejected` all render in `--status-neutral` `#8B96AC` and are distinguished entirely by the fill axis of Requirement 19 and by their mandatory labels: `incomplete` is `●` (a verdict exists), `cancelled` is `○` with a slash (stopped before one), `rejected` is `●` (the gate judged). `#6B7488` is `--fg-dim` only and never carries status, per Requirement 140.
+23a. There is no `--status-muted` token. `incomplete`, `cancelled`, and `rejected` all render in `--status-neutral` `#8B96AC` and are distinguished entirely by the fill axis of Requirement 19 and by their mandatory labels: `incomplete` is `●` (a verdict exists), `cancelled` is `○` with a slash (stopped before one), `rejected` is `●` (the gate judged). `--fg-dim` `#85735E` never carries status, per Requirement 140.
 24. `incomplete` renders `--status-neutral`, not `--status-fault`. Agent Runtime edge 20a reserves `failed` for infrastructure faults; rendering a legitimate self-reported negative in the fault colour trains the operator to ignore the fault colour.
 25. `budget_exhausted` and `no_progress` share a hue and a mark. They are distinguished by a **mandatory inline qualifier** appended to the chip, naming the cause the runtime is already required to record: `BUDGET · max_steps`, `NO PROGRESS · shell ×3`. The qualifier is not optional and is not a tooltip.
 26. Adapter status marks are:
@@ -423,21 +427,23 @@ These four are surfacings of endpoints and flows the specs already define. Nothi
 ### Contrast, greyscale, and copy
 
 138. Status hues are used as text and mark colours. A status chip's background is that hue at 12% alpha rather than a filled pill, which moves the backdrop luminance by roughly 2% and so preserves a contrast ratio measured against the underlying surface.
-139. **Every status hue meets a contrast ratio of at least 4.5:1 against both `--surface-2` and `--surface-3`, asserted by an automated token test at build time.** The test is the requirement; the measured values below are informative.
+139. **Every status hue meets a contrast ratio of at least 4.5:1 against both `--surface-2` and `--surface-3`, asserted by an automated token test at build time.** The test is the requirement; the measured values below are informative. They are computed against the Armada Oak grounds of Requirement 2 by the WCAG 2.1 relative-luminance formula.
+139a. **`--accent` on `--surface-3` is the tightest margin in the system at 4.97:1 — 0.47 of headroom above the floor.** It was also the tightest on the previous slate ramp at 4.91:1, so this is a property of the accent rather than of the oak amendment. It is the token most likely to fail the Requirement 139 build test under any future change, and that is not evident from the table, so it is stated here.
 
-| Token | Hex | Approx. ratio on `--surface-2` |
-|---|---|---|
-| `--status-live` | `#38BDF8` | ≈ 8.5:1 |
-| `--status-good` | `#34D399` | ≈ 9.5:1 |
-| `--status-warn` | `#F2B33D` | ≈ 9.8:1 |
-| `--status-pending` | `#A78BFA` | ≈ 7.0:1 |
-| `--status-fault` | `#F26D6D` | ≈ 6.3:1 |
-| `--fg-muted` | `#9AA4B8` | ≈ 6.4:1 |
-| `--status-neutral` | `#8B96AC` | ≈ 5.5:1 |
-| `--accent` | `#4C8DFF` | ≈ 5.3:1 |
-| `--fg-dim` | `#6B7488` | ≈ 3.4:1 |
+| Token | Hex | On `--surface-2` | On `--surface-3` |
+|---|---|---|---|
+| `--fg` | `#F2E8D8` | 14.66 | 13.10 |
+| `--status-warn` | `#F2B33D` | 9.56 | 8.55 |
+| `--status-good` | `#34D399` | 9.25 | 8.27 |
+| `--status-live` | `#38BDF8` | 8.30 | 7.42 |
+| `--fg-muted` | `#B8A68C` | 7.51 | 6.72 |
+| `--status-pending` | `#A78BFA` | 6.54 | 5.84 |
+| `--status-fault` | `#F26D6D` | 6.09 | 5.44 |
+| `--status-neutral` | `#8B96AC` | 5.98 | 5.34 |
+| `--accent` | `#4C8DFF` | 5.56 | **4.97** |
+| `--fg-dim` | `#85735E` | 3.91 | 3.49 |
 
-140. `--fg-dim` falls below 4.5:1 and is therefore restricted to non-essential text — `seq` numbers, relative timestamps, and placeholder hints. It never carries status and never carries a value the operator must read to make a decision. Requirement 75's phantom line and Requirement 83's inactive rail segments are exempt because each is accompanied by an adjacent full-contrast label.
+140. `--fg-dim` `#85735E` measures 3.91:1 and 3.49:1 and therefore falls below 4.5:1 and is therefore restricted to non-essential text — `seq` numbers, relative timestamps, and placeholder hints. It never carries status and never carries a value the operator must read to make a decision. Requirement 75's phantom line and Requirement 83's inactive rail segments are exempt because each is accompanied by an adjacent full-contrast label.
 141. **The design does not rely on colour: no two states within one family are distinguishable by colour alone.** The claim is scoped to a family deliberately; cross-family identity is intentional and is covered by Requirement 142a. Desaturated, `--status-good` and `--status-warn` collapse together at high luminance, and `--status-fault`, `--status-pending`, `--status-neutral`, and `--accent` collapse together at mid luminance. Shape therefore carries the primary distinction across six marks: `●` a verdict exists, `○` stopped before a verdict, `◐` a verdict is pending, `▲` fault, `✕`-in-square integrity fault, `◌` connection unknown.
 142. The residual within-family greyscale collision is `budget_exhausted` (`--status-warn` `○`) against `cancelled` (`--status-neutral` `○`), both in the run outcome family. It is resolved by the slash on the cancelled mark and by the mandatory text label of Requirement 32.
 142a. Two cross-family identities are **intentional and must not be treated as defects**: `incomplete` (run outcome) and `rejected` (adapter status) both render `--status-neutral` `●`, and `cancelled` (run outcome), `retired` (binding status), and a queued delegation all render `--status-neutral` `○`. In each case the pair means the same thing under Requirement 31a, the states appear in different tables with different labels, and reading one as the other produces no wrong conclusion.
