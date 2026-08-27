@@ -129,7 +129,8 @@ the pipeline when a task first needs one.
 | `armada-db` | `pgvector/pgvector:pg16`; `gen_random_uuid()` from core, not `uuid-ossp` | Phase 0 |
 | Migrations | Plain SQL under `db/migrations/`, applied by `db/apply-migrations.sh`, tracked in `schema_migrations` | Phase 0 |
 | `armada-dashboard` | **Undecided.** Phase 0 ships an nginx static placeholder precisely so Phase 8 can pick the bundler and state library | — |
-| Test framework | **Undecided** for both services | — |
+| Test framework | `pytest` for `armada-forge`; **`node:test`** (built into Node 22 — no new dependency) for `armada-daemon`. **Every phase lands its own tests before it is marked done.** | Testing, 2026-08-24 |
+| Test execution | Manual via `scripts/smoke-test.sh` on a Docker host now; **GitHub Actions CI added after P7**, once the agent loop exists and the end-to-end path is stable enough to guard | Testing, 2026-08-24 |
 | Linter / formatter | **Undecided** for both services | — |
 
 ### Conventions that are already load-bearing

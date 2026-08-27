@@ -1,0 +1,1084 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Armada — Playground A</title>
+<style>
+/* ============================================================
+   ARMADA PLAYGROUND A
+   Throwaway design artifact. NOT the real app.
+   Everything drives off CSS custom properties set on :root.
+   ============================================================ */
+
+:root {
+  /* --- surface --- */
+  --bg:          #0B1017;
+  --bg-raised:   #121A24;
+  --bg-sunken:   #070B10;
+  --bg-hover:    #18222E;
+
+  /* --- line --- */
+  --border:      #1E2A38;
+  --border-strong:#2C3D50;
+
+  /* --- text --- */
+  --text:        #DCE6F0;
+  --text-dim:    #8296AC;
+  --text-faint:  #556878;
+
+  /* --- semantic --- */
+  --accent:      #35D6E8;
+  --accent-fg:   #04141A;
+  --ok:          #3DD68C;
+  --warn:        #E8B339;
+  --err:         #F2555A;
+  --info:        #6E9FFF;
+  --muted:       #6E7F92;
+
+  /* --- shape + rhythm --- */
+  --radius:      6px;
+  --radius-sm:   4px;
+  --unit:        4px;
+  --font-ui:     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono:   ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Code", Menlo, Consolas, monospace;
+  --fs-base:     13px;
+  --tracking:    0em;
+
+  /* derived */
+  --s1: calc(var(--unit) * 1);
+  --s2: calc(var(--unit) * 2);
+  --s3: calc(var(--unit) * 3);
+  --s4: calc(var(--unit) * 4);
+  --s5: calc(var(--unit) * 5);
+  --s6: calc(var(--unit) * 6);
+  --s8: calc(var(--unit) * 8);
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--fs-base);
+  letter-spacing: var(--tracking);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+h1,h2,h3,h4 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+code, .mono { font-family: var(--font-mono); font-size: 0.92em; font-variant-numeric: tabular-nums; }
+
+/* ============================================================
+   CONTROL BAR  (playground chrome — not part of the design)
+   ============================================================ */
+.chrome {
+  position: sticky; top: 0; z-index: 100;
+  background: var(--bg-sunken);
+  border-bottom: 1px solid var(--border-strong);
+  padding: var(--s3) var(--s4);
+  display: flex; flex-wrap: wrap; gap: var(--s4); align-items: center;
+}
+.chrome-label {
+  font-size: 10px; text-transform: uppercase; letter-spacing: .1em;
+  color: var(--text-faint); font-weight: 700; margin-right: var(--s1);
+}
+.presets { display: flex; gap: var(--s1); flex-wrap: wrap; }
+.preset-btn {
+  font: inherit; font-size: 12px; font-weight: 600;
+  padding: 6px 12px; border-radius: var(--radius-sm); cursor: pointer;
+  background: var(--bg-raised); color: var(--text-dim);
+  border: 1px solid var(--border);
+  display: flex; align-items: center; gap: 7px;
+}
+.preset-btn:hover { background: var(--bg-hover); color: var(--text); }
+.preset-btn[aria-pressed="true"] {
+  background: var(--accent); color: var(--accent-fg); border-color: var(--accent);
+}
+.swatch { width: 10px; height: 10px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(255,255,255,.18); }
+.ctl { display: flex; align-items: center; gap: var(--s2); font-size: 11px; color: var(--text-dim); }
+.ctl input[type=range] { width: 84px; accent-color: var(--accent); }
+.ctl input[type=color] {
+  width: 26px; height: 22px; padding: 0; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: none; cursor: pointer;
+}
+.ctl select {
+  font: inherit; font-size: 11px; background: var(--bg-raised); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 6px;
+}
+.ctl-val { font-family: var(--font-mono); color: var(--text-faint); min-width: 30px; }
+.copy-btn {
+  margin-left: auto; font: inherit; font-size: 12px; font-weight: 600;
+  padding: 6px 14px; border-radius: var(--radius-sm); cursor: pointer;
+  background: transparent; color: var(--accent); border: 1px solid var(--accent);
+}
+.copy-btn:hover { background: var(--accent); color: var(--accent-fg); }
+
+/* ============================================================
+   LAYOUT
+   ============================================================ */
+.wrap { max-width: 1180px; margin: 0 auto; padding: var(--s8) var(--s4) 120px; }
+.sec { margin-bottom: var(--s8); }
+.sec-head {
+  display: flex; align-items: baseline; gap: var(--s3);
+  padding-bottom: var(--s2); margin-bottom: var(--s4);
+  border-bottom: 1px solid var(--border);
+}
+.sec-head h2 { font-size: 15px; }
+.sec-head .n {
+  font-family: var(--font-mono); font-size: 11px; color: var(--accent);
+  border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px;
+}
+.sec-head .why { font-size: 11px; color: var(--text-faint); margin-left: auto; text-align: right; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s4); }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s3); }
+@media (max-width: 860px) { .grid2, .grid3 { grid-template-columns: 1fr; } }
+
+.card {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.card-head {
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: var(--s3);
+}
+.card-head h3 { font-size: 13px; }
+.card-body { padding: var(--s4); }
+
+/* ============================================================
+   BADGES — outcome + status
+   ============================================================ */
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  padding: 2px 8px; border-radius: 999px;
+  border: 1px solid currentColor; line-height: 1.6;
+}
+.badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.badge--success           { color: var(--ok); }
+.badge--incomplete        { color: var(--warn); }
+.badge--failed            { color: var(--err); }
+.badge--cancelled         { color: var(--muted); }
+.badge--budget_exhausted  { color: var(--warn); }
+.badge--no_progress       { color: var(--err); }
+.badge--running           { color: var(--accent); }
+.badge--running::before { animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity:1; transform:scale(1);} 50% { opacity:.35; transform:scale(.7);} }
+.badge--promoted { color: var(--ok); }
+.badge--retired  { color: var(--muted); }
+.badge--missing  { color: var(--err); }
+
+/* ============================================================
+   RUN HEADER + BUDGET METERS
+   ============================================================ */
+.run-head { padding: var(--s4); border-bottom: 1px solid var(--border); }
+.run-title { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+.run-title h3 { font-size: 15px; }
+.run-sub {
+  margin-top: var(--s2); display: flex; gap: var(--s4); flex-wrap: wrap;
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-faint);
+}
+.run-sub b { color: var(--text-dim); font-weight: 500; }
+.run-task {
+  margin-top: var(--s3); padding: var(--s3);
+  background: var(--bg-sunken); border-radius: var(--radius-sm);
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-dim); font-size: 12px;
+}
+
+.meters { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s3); margin-top: var(--s4); }
+@media (max-width: 700px) { .meters { grid-template-columns: repeat(2, 1fr); } }
+.meter-k {
+  font-family: var(--font-mono); font-size: 10px; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--text-faint);
+  display: flex; justify-content: space-between; gap: var(--s2);
+}
+.meter-v { font-family: var(--font-mono); font-size: 12px; color: var(--text); margin: 3px 0 5px; }
+.meter-track { height: 3px; background: var(--bg-sunken); border-radius: 2px; overflow: hidden; }
+.meter-fill { height: 100%; background: var(--accent); border-radius: 2px; }
+.meter--warn .meter-fill { background: var(--warn); }
+.meter--err  .meter-fill { background: var(--err); }
+
+/* ============================================================
+   EVENT STREAM  — the hero surface
+   ============================================================ */
+.stream-bar {
+  display: flex; align-items: center; gap: var(--s2);
+  padding: var(--s2) var(--s4); border-bottom: 1px solid var(--border);
+  background: var(--bg-sunken);
+}
+/* 14 event types will never fit — horizontal scroller, always. */
+.filters {
+  display: flex; gap: 5px; overflow-x: auto; scrollbar-width: none;
+  -webkit-overflow-scrolling: touch; padding: 2px 0; flex: 1; min-width: 0;
+}
+.filters::-webkit-scrollbar { display: none; }
+.chip {
+  flex: 0 0 auto; font: inherit; font-family: var(--font-mono); font-size: 10.5px;
+  padding: 3px 8px; border-radius: 999px; cursor: pointer; white-space: nowrap;
+  background: transparent; color: var(--text-faint); border: 1px solid var(--border);
+}
+.chip:hover { color: var(--text); border-color: var(--border-strong); }
+.chip[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.chip .dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; margin-right: 5px; vertical-align: 1px; }
+.stream-live {
+  flex: 0 0 auto; font-family: var(--font-mono); font-size: 10.5px;
+  color: var(--accent); display: flex; align-items: center; gap: 5px; padding-left: var(--s2);
+  border-left: 1px solid var(--border);
+}
+.stream-live::before { content:''; width:6px; height:6px; border-radius:50%; background: currentColor; animation: pulse 1.4s ease-in-out infinite; }
+
+.stream { padding: var(--s2) 0; }
+.ev {
+  display: grid; grid-template-columns: 44px 3px 1fr;
+  gap: 0 var(--s3); align-items: stretch;
+  padding: 0 var(--s4);
+  --ev-color: var(--muted);
+}
+.ev:hover { background: var(--bg-hover); }
+.ev-seq {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint);
+  text-align: right; padding: 9px 0 0; user-select: none;
+}
+.ev-spine { background: var(--ev-color); opacity: .32; border-radius: 2px; }
+.ev--dot .ev-spine { opacity: 0; position: relative; }
+.ev-body { padding: 7px 0 9px; min-width: 0; }
+.ev-head { display: flex; align-items: baseline; gap: var(--s2); flex-wrap: wrap; }
+.ev-type {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--ev-color);
+}
+.ev-meta { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); }
+.ev-meta b { color: var(--text-dim); font-weight: 500; }
+.ev-content { margin-top: 4px; font-size: 12.5px; color: var(--text-dim); }
+.ev-content.msg { color: var(--text); }
+.ev-pre {
+  margin: 5px 0 0; padding: var(--s2) var(--s3);
+  background: var(--bg-sunken); border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
+  white-space: pre-wrap; word-break: break-word;
+}
+.ev-reason .ev-content { font-style: italic; color: var(--text-faint); }
+
+.ev--run_start       { --ev-color: var(--accent); }
+.ev--run_end         { --ev-color: var(--accent); }
+.ev--user_message    { --ev-color: var(--text); }
+.ev--model_request   { --ev-color: var(--muted); }
+.ev--model_response  { --ev-color: var(--info); }
+.ev--reasoning       { --ev-color: var(--text-faint); }
+.ev--tool_call       { --ev-color: var(--warn); }
+.ev--tool_result     { --ev-color: var(--ok); }
+.ev--tool_result_err { --ev-color: var(--err); }
+.ev--retrieval       { --ev-color: var(--info); }
+.ev--compaction      { --ev-color: var(--muted); }
+.ev--mode_downgraded { --ev-color: var(--warn); }
+.ev--mcp_unavailable { --ev-color: var(--warn); }
+.ev--delegation      { --ev-color: var(--accent); }
+.ev--error           { --ev-color: var(--err); }
+
+/* boundary rule — visually separates Turns */
+.turn-rule {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s3) var(--s4); color: var(--text-faint);
+  font-family: var(--font-mono); font-size: 10px;
+  text-transform: uppercase; letter-spacing: .1em;
+}
+.turn-rule::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+details.ev-fold > summary {
+  cursor: pointer; list-style: none; font-family: var(--font-mono);
+  font-size: 10.5px; color: var(--text-faint); padding-top: 3px;
+}
+details.ev-fold > summary::-webkit-details-marker { display: none; }
+details.ev-fold > summary::before { content: '▸ '; color: var(--ev-color); }
+details.ev-fold[open] > summary::before { content: '▾ '; }
+details.ev-fold > summary:hover { color: var(--text-dim); }
+
+.tag-err {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  color: var(--err); border: 1px solid var(--err); border-radius: 3px; padding: 0 4px;
+}
+.tag-trunc {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--warn); border: 1px solid var(--warn); border-radius: 3px; padding: 0 4px;
+}
+
+/* ============================================================
+   TEAM RUN TREE
+   ============================================================ */
+.tree { font-size: 12.5px; }
+.tnode { border-left: 1px solid var(--border); margin-left: 9px; padding-left: var(--s4); position: relative; }
+.tnode::before {
+  content: ''; position: absolute; left: -1px; top: 15px;
+  width: 12px; height: 1px; background: var(--border);
+}
+.trow {
+  display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap;
+  padding: var(--s2) var(--s2); border-radius: var(--radius-sm); cursor: pointer;
+}
+.trow:hover { background: var(--bg-hover); }
+.trow-root { padding-left: 0; }
+.trow .caret { color: var(--text-faint); font-size: 10px; width: 10px; }
+.trow .who { font-weight: 600; }
+.trow .role {
+  font-family: var(--font-mono); font-size: 10px; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--text-faint);
+  border: 1px solid var(--border); border-radius: 3px; padding: 0 5px;
+}
+.trow .nums { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); display: flex; gap: var(--s3); }
+
+/* ============================================================
+   LIST ROWS  (corpora, sources, bindings, agents)
+   ============================================================ */
+.rows { display: flex; flex-direction: column; }
+.row {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s3) var(--s4); border-bottom: 1px solid var(--border);
+}
+.row:last-child { border-bottom: 0; }
+.row:hover { background: var(--bg-hover); }
+.row-main { min-width: 0; flex: 1; }
+.row-title { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: var(--s2); }
+.row-sub {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint);
+  margin-top: 2px; display: flex; gap: var(--s3); flex-wrap: wrap;
+}
+.row-right { display: flex; align-items: center; gap: var(--s3); }
+.kind {
+  font-family: var(--font-mono); font-size: 10px; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--text-faint);
+  border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px;
+}
+
+.progress { width: 120px; }
+.progress-track { height: 3px; background: var(--bg-sunken); border-radius: 2px; overflow: hidden; }
+.progress-fill { height: 100%; background: var(--accent); border-radius: 2px; }
+.progress-fill.indet {
+  width: 35% !important;
+  animation: slide 1.4s ease-in-out infinite;
+}
+@keyframes slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+.progress-label { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); margin-top: 3px; text-align: right; }
+
+/* ============================================================
+   FORM  (AgentEditor — inline per-field-path validation)
+   ============================================================ */
+.field { margin-bottom: var(--s4); }
+.field label {
+  display: block; font-size: 11px; font-weight: 600; color: var(--text-dim);
+  margin-bottom: 5px;
+}
+.field .path { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); font-weight: 400; }
+.input, .select, .textarea {
+  width: 100%; font: inherit; font-size: 12.5px;
+  background: var(--bg-sunken); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 7px 9px;
+}
+.textarea { font-family: var(--font-mono); font-size: 11.5px; min-height: 72px; resize: vertical; }
+.input:focus, .select:focus, .textarea:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.field--err .input, .field--err .select { border-color: var(--err); }
+.field-err {
+  margin-top: 5px; font-family: var(--font-mono); font-size: 10.5px; color: var(--err);
+  display: flex; gap: 6px;
+}
+.field-hint { margin-top: 5px; font-size: 11px; color: var(--text-faint); }
+
+.btn {
+  font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+  padding: 7px 14px; border-radius: var(--radius-sm);
+  background: var(--accent); color: var(--accent-fg); border: 1px solid var(--accent);
+}
+.btn:hover { filter: brightness(1.1); }
+.btn--ghost { background: transparent; color: var(--text-dim); border-color: var(--border); }
+.btn--ghost:hover { color: var(--text); border-color: var(--border-strong); filter: none; }
+.btn--danger { background: transparent; color: var(--err); border-color: var(--err); }
+.btn--sm { font-size: 11px; padding: 4px 10px; }
+
+/* ============================================================
+   STATES — empty / loading / error
+   ============================================================ */
+.state { padding: var(--s8) var(--s4); text-align: center; }
+.state-icon {
+  width: 34px; height: 34px; margin: 0 auto var(--s3);
+  border: 1px dashed var(--border-strong); border-radius: var(--radius);
+  display: grid; place-items: center; color: var(--text-faint);
+  font-family: var(--font-mono); font-size: 15px;
+}
+.state h4 { font-size: 13px; margin-bottom: 5px; }
+.state p { margin: 0 auto var(--s4); max-width: 300px; font-size: 12px; color: var(--text-faint); }
+.state--err .state-icon { border-style: solid; border-color: var(--err); color: var(--err); }
+.state--err h4 { color: var(--err); }
+
+.skel { background: var(--bg-sunken); border-radius: var(--radius-sm); height: 10px; position: relative; overflow: hidden; }
+.skel::after {
+  content:''; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--text) 7%, transparent), transparent);
+  animation: shimmer 1.5s infinite;
+}
+@keyframes shimmer { 0% { transform: translateX(-100%);} 100% { transform: translateX(100%);} }
+
+.banner {
+  display: flex; gap: var(--s3); align-items: flex-start;
+  padding: var(--s3) var(--s4); border-radius: var(--radius);
+  border: 1px solid var(--warn); background: color-mix(in srgb, var(--warn) 9%, transparent);
+  font-size: 12px; color: var(--text-dim);
+}
+.banner--err { border-color: var(--err); background: color-mix(in srgb, var(--err) 9%, transparent); }
+.banner b { color: var(--text); }
+.banner .mark { font-family: var(--font-mono); font-weight: 700; color: var(--warn); }
+.banner--err .mark { color: var(--err); }
+
+.note {
+  font-size: 11px; color: var(--text-faint); margin-top: var(--s2);
+  padding-left: var(--s3); border-left: 2px solid var(--border);
+}
+.toast {
+  position: fixed; bottom: var(--s4); left: 50%; transform: translateX(-50%) translateY(20px);
+  background: var(--bg-raised); border: 1px solid var(--accent); color: var(--text);
+  padding: var(--s2) var(--s4); border-radius: var(--radius); font-size: 12px;
+  opacity: 0; transition: all .18s ease; pointer-events: none; z-index: 200;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<!-- ============ PLAYGROUND CHROME ============ -->
+<div class="chrome">
+  <span class="chrome-label">Feel</span>
+  <div class="presets" id="presets"></div>
+
+  <div class="ctl">
+    <span>Accent</span>
+    <input type="color" id="accentPick" value="#35D6E8">
+  </div>
+  <div class="ctl">
+    <span>Radius</span>
+    <input type="range" id="radiusRange" min="0" max="14" step="1" value="6">
+    <span class="ctl-val" id="radiusVal">6px</span>
+  </div>
+  <div class="ctl">
+    <span>Density</span>
+    <input type="range" id="unitRange" min="3" max="6" step="0.5" value="4">
+    <span class="ctl-val" id="unitVal">4px</span>
+  </div>
+  <div class="ctl">
+    <span>Type</span>
+    <select id="fontSel">
+      <option value="system">System UI</option>
+      <option value="grotesk">Grotesk</option>
+      <option value="mono">Mono everywhere</option>
+      <option value="serif">Serif headings</option>
+    </select>
+  </div>
+  <button class="copy-btn" id="copyBtn">Copy tokens</button>
+</div>
+
+<div class="wrap">
+
+  <!-- ============ 1. RUN INSPECTOR ============ -->
+  <section class="sec">
+    <div class="sec-head">
+      <h2>Run Inspector</h2>
+      <span class="n">Agent Runtime</span>
+      <span class="why">The hero surface. Append-only event log,<br>14 types, live over WebSocket.</span>
+    </div>
+
+    <div class="card">
+      <div class="run-head">
+        <div class="run-title">
+          <h3>frontend-engineer</h3>
+          <span class="badge badge--running">running</span>
+          <span class="kind">standard mode</span>
+          <button class="btn btn--danger btn--sm" style="margin-left:auto">Cancel run</button>
+        </div>
+        <div class="run-sub">
+          <span><b>run</b> 8f2c-a41e</span>
+          <span><b>version</b> v4</span>
+          <span><b>tag</b> qwen3-4b:base</span>
+          <span><b>corpus</b> armada-docs</span>
+          <span><b>workspace</b> /work/checkout</span>
+        </div>
+        <div class="run-task">Migrate the settings panel off the legacy context provider and add a regression test.</div>
+
+        <div class="meters">
+          <div>
+            <div class="meter-k"><span>steps</span><span>30%</span></div>
+            <div class="meter-v">12 / 40</div>
+            <div class="meter-track"><div class="meter-fill" style="width:30%"></div></div>
+          </div>
+          <div>
+            <div class="meter-k"><span>tokens</span><span>24%</span></div>
+            <div class="meter-v">48.2k / 200k</div>
+            <div class="meter-track"><div class="meter-fill" style="width:24%"></div></div>
+          </div>
+          <div class="meter--warn">
+            <div class="meter-k"><span>wall clock</span><span>78%</span></div>
+            <div class="meter-v">23m 24s / 30m</div>
+            <div class="meter-track"><div class="meter-fill" style="width:78%"></div></div>
+          </div>
+          <div>
+            <div class="meter-k"><span>tool calls</span><span>26%</span></div>
+            <div class="meter-v">31 / 120</div>
+            <div class="meter-track"><div class="meter-fill" style="width:26%"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="stream-bar">
+        <div class="filters" id="filters"></div>
+        <span class="stream-live">live</span>
+      </div>
+
+      <div class="stream">
+
+        <div class="turn-rule">Turn 1</div>
+
+        <div class="ev ev--run_start">
+          <div class="ev-seq">1</div><div class="ev-spine"></div>
+          <div class="ev-body">
+            <div class="ev-head"><span class="ev-type">run_start</span>
+              <span class="ev-meta">14:02:11 · <b>sandbox</b> node-20-restricted · <b>net</b> none</span></div>
+          </div>
+        </div>
+
+        <div class="ev ev--user_message">
+          <div class="ev-seq">2</div><div class="ev-spine"></div>
+          <div class="ev-body">
+            <div class="ev-head"><span class="ev-type">user_message</span><span class="ev-meta">14:02:11</span></div>
+            <div class="ev-content msg">Migrate the settings panel off the legacy context provider and add a regression test.</div>
+          </div>
+        </div>
+
+        <div class="ev ev--retrieval">
+          <div class="ev-seq">3</div><div class="ev-spine"></div>
+          <div class="ev-body">
+            <div class="ev-head"><span class="ev-type">retrieval</span>
+              <span class="ev-meta"><b>auto-inject</b> · k=4 · 4 chunks · 812 tok</span></div>
+            <details class="ev-fold">
+              <summary>4 chunks · RRF fused</summary>
+              <div class="ev-pre">0.031  src/context/SettingsProvider.tsx:14
+0.028  docs/migration/context-v2.md:3
+0.019  src/panels/SettingsPanel.tsx:1
+0.011  CHANGELOG.md:88</div>
+            </details>
+          </div>
+        </div>
+
+        <div class="ev ev--model_request">
+          <div class="ev-seq">4</div><div class="ev-spine"></div>
+          <div class="ev-body">
+            <div class="ev-head"><span class="ev-type">model_request</span>
+              <span class="ev-meta"><b>qwen3-4b:base</b> · 4,318 prompt tok · queued 0ms</span></div>
+          </div>
+        </div>
+
+        <div class="ev ev--reasoning ev-reason">
+          <div class="ev-seq">5</div><div class="ev-spine"></div>
+          <div class="ev-body">
+            <div class="ev-head"><span class="ev-type">reasoning</span><span class="ev-meta">312 tok</span></div>
+            <div class="ev-content">The provider is imported in three panels. I should read the current implementation before changing any call site…</div>
+          </div>
+        </div>
+
+        <div class="ev ev--model_response">
+          <div class="ev-seq">6</div><div class="ev-spine"></div>
+          <div class="ev-body">
+            <div class="ev-head"><span class="ev-type">model_response</span>
+              <span class="ev-meta">1,104 completion tok · 2 tool calls</span></div>
+            <div class="ev-content msg">Reading the provider and its call sites first.</div>
+          </div>
+        </div>
+
+        <div class="ev ev--tool_call">
+          <div class="ev-seq">7</div><div class="ev-spine"></div>
+          <div class="ev-body">
+            <div class="ev-head"><span class="ev-type">tool_call</span><span class="ev-meta"><b>read_file</b></span></div>
+            <div class="ev-pre">{ "path": "src/context/SettingsProvider.tsx" }</div>
+          </div>
+        </div>
+
+        <div class="ev ev--tool_result">
+          <div class="ev-seq">8</div><div class="ev-spine"></div>
+          <div class="ev-body">
+            <div class="ev-head"><span class="ev-type">tool_result</span>
+              <span class="ev-meta"><b>read_file</b> · 0.04s · 2,940 tok</span>
+              <span class="tag-trunc">truncated</span></div>
+            <div class="ev-content">Result exceeded <code>max_tool_result_tokens</code>. Full output spilled to sandbox.</div>
+            <div class="ev-pre">/armada/tool-results/e41f-9a02.txt</div>
+          </div>
+        </div>
+
+        <div class="ev ev--tool_call">
+          <div class="ev-seq">9</div><div class="ev-spine"></div>
+          <div class="ev-body">
+            <div class="ev-head"><span class="ev-type">tool_call</span><span class="ev-meta"><b>shell</b> · concurrent 2/4</span></div>
+            <div class="ev-pre">{ "cmd": "rg -l 'useSettingsContext' src/" }</div>
+          </div>
+        </div>
+
+        <div class="ev ev--tool_result_err">
+          <div class="ev-seq">10</div><div class="ev-spine"></div>
+          <div class="ev-body">
+            <div class="ev-head"><span class="ev-type">tool_result</span>
+              <span class="ev-meta"><b>shell</b> · 30.0s</span>
+              <span class="tag-err">is_error</span><span class="tag-err">timed_out</span></div>
+            <div class="ev-content">Killed at sandbox profile <code>timeout_seconds</code>. Loop continues.</div>
+          </div>
+        </div>
+
+        <div class="ev ev--compaction">
+          <div class="ev-seq">11</div><div class="ev-spine"></div>
+          <div class="ev-body">
+            <div class="ev-head"><span class="ev-type">compaction</span>
+              <span class="ev-meta">18 messages · 31,204 → 4,180 tok · <b>summarized</b></span></div>
+          </div>
+        </div>
+
+        <div class="ev ev--mcp_unavailable">
+          <div class="ev-seq">12</div><div class="ev-spine"></div>
+          <div class="ev-body">
+            <div class="ev-head"><span class="ev-type">mcp_unavailable</span><span class="ev-meta"><b>github</b> · stdio</span></div>
+            <div class="ev-content">Server failed to connect at run start. Run continues without its tools.</div>
+          </div>
+        </div>
+
+        <div class="ev ev--error">
+          <div class="ev-seq">13</div><div class="ev-spine"></div>
+          <div class="ev-body">
+            <div class="ev-head"><span class="ev-type">error</span><span class="ev-meta">budget clamped</span></div>
+            <div class="ev-content"><code>max_steps</code> snapshot 240 exceeds ceiling 200. Clamped to 200; run proceeds.</div>
+          </div>
+        </div>
+
+        <div class="turn-rule">Turn 2 — operator message</div>
+
+        <div class="ev ev--delegation">
+          <div class="ev-seq">14</div><div class="ev-spine"></div>
+          <div class="ev-body">
+            <div class="ev-head"><span class="ev-type">delegation</span>
+              <span class="ev-meta">→ <b>test-writer</b> · child 3d91-77c0</span></div>
+            <div class="ev-content">Write a regression test covering the migrated settings panel.</div>
+          </div>
+        </div>
+
+        <div class="ev ev--run_end">
+          <div class="ev-seq">15</div><div class="ev-spine"></div>
+          <div class="ev-body">
+            <div class="ev-head"><span class="ev-type">run_end</span>
+              <span class="badge badge--success">success</span>
+              <span class="ev-meta">self-reported · 18 steps · 62.4k tok · 26m 02s</span></div>
+            <div class="ev-content msg">Migrated all three call sites to the v2 provider and added <code>SettingsPanel.regression.test.tsx</code>. Suite passes.</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="note">
+      Filter row holds all 14 event types — it is a horizontal scroller by construction, never a wrap.
+      Spine colour is the only per-type signal that survives at speed; the type label is a monospace echo of it.
+    </div>
+  </section>
+
+  <!-- ============ 2. OUTCOMES ============ -->
+  <section class="sec">
+    <div class="sec-head">
+      <h2>Terminal outcomes</h2><span class="n">6 + running</span>
+      <span class="why">Only <code>success</code> is self-reported.<br>Never inferred from termination.</span>
+    </div>
+    <div class="card"><div class="card-body" style="display:flex;gap:var(--s3);flex-wrap:wrap">
+      <span class="badge badge--running">running</span>
+      <span class="badge badge--success">success</span>
+      <span class="badge badge--incomplete">incomplete</span>
+      <span class="badge badge--failed">failed</span>
+      <span class="badge badge--cancelled">cancelled</span>
+      <span class="badge badge--budget_exhausted">budget_exhausted</span>
+      <span class="badge badge--no_progress">no_progress</span>
+    </div></div>
+    <div class="note">
+      <code>incomplete</code> is warn, not error — the agent ran correctly and said it didn't finish.
+      <code>failed</code> is reserved for infrastructure faults. The palette has to hold that distinction.
+    </div>
+  </section>
+
+  <!-- ============ 3. TEAM RUN TREE ============ -->
+  <section class="sec">
+    <div class="sec-head">
+      <h2>Team run tree</h2><span class="n">Team Orchestration</span>
+      <span class="why">Manager stream, each delegation<br>expandable into its child run.</span>
+    </div>
+    <div class="card"><div class="card-body tree">
+      <div class="trow trow-root">
+        <span class="caret">▾</span>
+        <span class="who">release-crew</span>
+        <span class="role">manager</span>
+        <span class="badge badge--success">success</span>
+        <span class="nums"><span>3 children</span><span>184.2k tok</span><span>41m 08s</span></span>
+      </div>
+      <div class="tnode">
+        <div class="trow">
+          <span class="caret">▸</span><span class="who">frontend-engineer</span><span class="role">worker</span>
+          <span class="badge badge--success">success</span>
+          <span class="nums"><span>62.4k</span><span>26m 02s</span></span>
+        </div>
+      </div>
+      <div class="tnode">
+        <div class="trow">
+          <span class="caret">▾</span><span class="who">test-writer</span><span class="role">worker</span>
+          <span class="badge badge--incomplete">incomplete</span>
+          <span class="nums"><span>41.1k</span><span>09m 44s</span></span>
+        </div>
+        <div class="tnode">
+          <div class="trow">
+            <span class="caret" style="opacity:0">▸</span><span class="who">fixture-builder</span><span class="role">worker</span>
+            <span class="badge badge--success">success</span>
+            <span class="nums"><span>12.0k</span><span>03m 12s</span></span>
+          </div>
+        </div>
+      </div>
+      <div class="tnode">
+        <div class="trow">
+          <span class="caret">▸</span><span class="who">doc-writer</span><span class="role">worker</span>
+          <span class="badge badge--budget_exhausted">budget_exhausted</span>
+          <span class="nums"><span>80.7k</span><span>05m 22s</span></span>
+        </div>
+      </div>
+    </div></div>
+  </section>
+
+  <!-- ============ 4. CORPORA + MODELS ============ -->
+  <section class="sec">
+    <div class="sec-head">
+      <h2>Corpora &amp; model bindings</h2><span class="n">Training Pipeline</span>
+      <span class="why">Ingestion progress arrives over WS.<br>Bindings are pinned, never live.</span>
+    </div>
+    <div class="grid2">
+
+      <div class="card">
+        <div class="card-head"><h3>armada-docs</h3><span class="kind">4 sources</span>
+          <button class="btn btn--ghost btn--sm" style="margin-left:auto">Add source</button></div>
+        <div class="rows">
+          <div class="row">
+            <div class="row-main">
+              <div class="row-title">armada/armada <span class="kind">git</span></div>
+              <div class="row-sub"><span>1,204 chunks</span><span>bge-small</span><span>ingested 2d ago</span></div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="row-main">
+              <div class="row-title">docs.armada.dev <span class="kind">url</span></div>
+              <div class="row-sub"><span>chunking</span><span>page 61 / 180</span></div>
+            </div>
+            <div class="row-right"><div class="progress">
+              <div class="progress-track"><div class="progress-fill" style="width:34%"></div></div>
+              <div class="progress-label">34%</div>
+            </div></div>
+          </div>
+          <div class="row">
+            <div class="row-main">
+              <div class="row-title">./handbook <span class="kind">dir</span></div>
+              <div class="row-sub"><span>embedding</span><span>queued behind 1</span></div>
+            </div>
+            <div class="row-right"><div class="progress">
+              <div class="progress-track"><div class="progress-fill indet"></div></div>
+              <div class="progress-label">indeterminate</div>
+            </div></div>
+          </div>
+          <div class="row">
+            <div class="row-main">
+              <div class="row-title">rfc-0042.pdf <span class="kind">file</span></div>
+              <div class="row-sub" style="color:var(--err)"><span>unsupported encoding at byte 4,192</span></div>
+            </div>
+            <div class="row-right"><button class="btn btn--ghost btn--sm">Retry</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Model bindings</h3><span class="kind">ollama</span></div>
+        <div class="rows">
+          <div class="row">
+            <div class="row-main">
+              <div class="row-title">qwen3-4b:base</div>
+              <div class="row-sub"><span>adapter none</span><span>ctx 32,768</span><span>hermes</span></div>
+            </div>
+            <div class="row-right"><span class="badge badge--promoted">promoted</span></div>
+          </div>
+          <div class="row">
+            <div class="row-main">
+              <div class="row-title">qwen3-4b:frontend-v3</div>
+              <div class="row-sub"><span>lora r=16</span><span>ppl 8.42</span><span>tool-call 98.1%</span></div>
+            </div>
+            <div class="row-right"><span class="badge badge--promoted">promoted</span></div>
+          </div>
+          <div class="row">
+            <div class="row-main">
+              <div class="row-title">qwen3-0.6b:smoke-11</div>
+              <div class="row-sub"><span>20 steps</span><span>cpu</span><span>unpromotable by design</span></div>
+            </div>
+            <div class="row-right"><span class="badge badge--retired">retired</span></div>
+          </div>
+          <div class="row">
+            <div class="row-main">
+              <div class="row-title">qwen3-4b:frontend-v2</div>
+              <div class="row-sub" style="color:var(--err)"><span>pinned by 2 agent versions</span></div>
+            </div>
+            <div class="row-right"><span class="badge badge--missing">missing</span></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div style="margin-top:var(--s3);display:flex;flex-direction:column;gap:var(--s3)">
+      <div class="banner">
+        <span class="mark">!</span>
+        <div><b>Code mode downgraded to Standard.</b> Binding <code>qwen3-0.6b:smoke-11</code> reports
+        <code>context_window</code> 8,192, below <code>code_mode_min_context</code> 16,384. Recorded as a <code>mode_downgraded</code> event.</div>
+      </div>
+      <div class="banner banner--err">
+        <span class="mark">×</span>
+        <div><b>Run start failed.</b> Pinned <code>binding_tag</code> <code>qwen3-4b:frontend-v2</code> is <code>missing</code>.
+        No sandbox was acquired. Adopt a newer adapter with <code>refresh-bindings</code>.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 5. AGENT EDITOR ============ -->
+  <section class="sec">
+    <div class="sec-head">
+      <h2>Agent editor</h2><span class="n">Agent Definition</span>
+      <span class="why">Validation errors surface inline<br>per field path, at save time.</span>
+    </div>
+    <div class="grid2">
+      <div class="card"><div class="card-body">
+        <div class="field">
+          <label>Name <span class="path">agent.name</span></label>
+          <input class="input" value="frontend-engineer">
+        </div>
+        <div class="field field--err">
+          <label>Corpus <span class="path">agent.corpus</span></label>
+          <select class="select"><option>armada-frontend-docs</option></select>
+          <div class="field-err"><span>×</span><span>no corpus named "armada-frontend-docs" — binding cannot resolve</span></div>
+        </div>
+        <div class="field field--err">
+          <label>Max steps <span class="path">agent.budgets.max_steps</span></label>
+          <input class="input" value="240">
+          <div class="field-err"><span>×</span><span>exceeds ceiling 200 in config/runtime.yaml</span></div>
+        </div>
+        <div class="field">
+          <label>Persona <span class="path">agent.persona</span></label>
+          <textarea class="textarea">You are a senior frontend engineer. Prefer reading before writing. Always run the test suite before calling finish.</textarea>
+          <div class="field-hint">Saving cuts a new version and pins a resolved snapshot of every reference.</div>
+        </div>
+        <div style="display:flex;gap:var(--s2)">
+          <button class="btn">Save version</button>
+          <button class="btn btn--ghost">Clone</button>
+          <button class="btn btn--ghost">Validate</button>
+        </div>
+      </div></div>
+
+      <div class="card">
+        <div class="card-head"><h3>Version history</h3><span class="kind">read only</span></div>
+        <div class="rows">
+          <div class="row">
+            <div class="row-main">
+              <div class="row-title">v4 <span class="kind">current</span></div>
+              <div class="row-sub"><span>qwen3-4b:base</span><span>armada-docs</span><span>6 tools</span></div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="row-main">
+              <div class="row-title">v3</div>
+              <div class="row-sub"><span>qwen3-4b:frontend-v3</span><span>refresh-bindings</span><span>4d ago</span></div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="row-main">
+              <div class="row-title">v2</div>
+              <div class="row-sub"><span>qwen3-4b:frontend-v2</span><span>code mode</span><span>11d ago</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 6. STATES ============ -->
+  <section class="sec">
+    <div class="sec-head">
+      <h2>Empty · loading · error</h2><span class="n">every surface</span>
+      <span class="why">Fresh install is the default state.<br>It has to teach, not apologise.</span>
+    </div>
+    <div class="grid3">
+      <div class="card"><div class="state">
+        <div class="state-icon">+</div>
+        <h4>No corpora yet</h4>
+        <p>A corpus carries domain knowledge. Point one at a git repo to start.</p>
+        <button class="btn btn--sm">Create corpus</button>
+      </div></div>
+
+      <div class="card"><div class="card-body">
+        <div style="display:flex;gap:var(--s3);align-items:center;margin-bottom:var(--s4)">
+          <div class="skel" style="width:34px;height:34px;border-radius:var(--radius)"></div>
+          <div style="flex:1"><div class="skel" style="width:56%"></div>
+          <div class="skel" style="width:34%;height:8px;margin-top:6px"></div></div>
+        </div>
+        <div class="skel" style="width:100%;margin-bottom:9px"></div>
+        <div class="skel" style="width:88%;margin-bottom:9px"></div>
+        <div class="skel" style="width:64%"></div>
+      </div></div>
+
+      <div class="card"><div class="state state--err">
+        <div class="state-icon">×</div>
+        <h4>Daemon unreachable</h4>
+        <p><code>armada-daemon</code> did not answer <code>/api/health</code>. Runs cannot start.</p>
+        <button class="btn btn--ghost btn--sm">Retry</button>
+      </div></div>
+    </div>
+  </section>
+
+</div>
+
+<div class="toast" id="toast">Tokens copied</div>
+
+<script>
+/* ============================================================
+   PRESETS — four feel directions
+   ============================================================ */
+const PRESETS = {
+  harbor: {
+    label: 'Deep Harbor', swatch: '#35D6E8',
+    vars: {
+      '--bg':'#0B1017','--bg-raised':'#121A24','--bg-sunken':'#070B10','--bg-hover':'#18222E',
+      '--border':'#1E2A38','--border-strong':'#2C3D50',
+      '--text':'#DCE6F0','--text-dim':'#8296AC','--text-faint':'#556878',
+      '--accent':'#35D6E8','--accent-fg':'#04141A',
+      '--ok':'#3DD68C','--warn':'#E8B339','--err':'#F2555A','--info':'#6E9FFF','--muted':'#6E7F92',
+      '--radius':'6px','--radius-sm':'4px','--unit':'4px','--fs-base':'13px','--tracking':'0em'
+    }
+  },
+  drydock: {
+    label: 'Drydock', swatch: '#14508C',
+    vars: {
+      '--bg':'#F7F6F3','--bg-raised':'#FFFFFF','--bg-sunken':'#EFEDE8','--bg-hover':'#F1EFEA',
+      '--border':'#DEDAD1','--border-strong':'#BEB8AB',
+      '--text':'#1A1815','--text-dim':'#5C574E','--text-faint':'#8C8578',
+      '--accent':'#14508C','--accent-fg':'#FFFFFF',
+      '--ok':'#1D7A4C','--warn':'#96650A','--err':'#B3261E','--info':'#14508C','--muted':'#8C8578',
+      '--radius':'3px','--radius-sm':'2px','--unit':'4px','--fs-base':'13px','--tracking':'0em'
+    }
+  },
+  signal: {
+    label: 'Signal', swatch: '#00FF9C',
+    vars: {
+      '--bg':'#000000','--bg-raised':'#0A0A0A','--bg-sunken':'#000000','--bg-hover':'#141414',
+      '--border':'#202020','--border-strong':'#333333',
+      '--text':'#E8E8E8','--text-dim':'#8A8A8A','--text-faint':'#5A5A5A',
+      '--accent':'#00FF9C','--accent-fg':'#001A0F',
+      '--ok':'#00FF9C','--warn':'#FFB800','--err':'#FF3B30','--info':'#4D9FFF','--muted':'#666666',
+      '--radius':'0px','--radius-sm':'0px','--unit':'4px','--fs-base':'12.5px','--tracking':'0.005em'
+    }
+  },
+  slate: {
+    label: 'Slate', swatch: '#8B7CF6',
+    vars: {
+      '--bg':'#16171A','--bg-raised':'#1D1E23','--bg-sunken':'#101114','--bg-hover':'#25272E',
+      '--border':'#2A2C33','--border-strong':'#3C3F49',
+      '--text':'#E4E5E9','--text-dim':'#9497A1','--text-faint':'#64666E',
+      '--accent':'#8B7CF6','--accent-fg':'#0E0A1C',
+      '--ok':'#4ADE80','--warn':'#FBBF24','--err':'#F87171','--info':'#60A5FA','--muted':'#71747E',
+      '--radius':'8px','--radius-sm':'6px','--unit':'4.5px','--fs-base':'13px','--tracking':'-0.003em'
+    }
+  }
+};
+
+const FONTS = {
+  system: { '--font-ui': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' },
+  grotesk:{ '--font-ui': '"Helvetica Neue", "Arial Narrow", Inter, system-ui, sans-serif' },
+  mono:   { '--font-ui': 'ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace' },
+  serif:  { '--font-ui': 'Georgia, "Iowan Old Style", "Times New Roman", serif' }
+};
+
+const EVENT_TYPES = [
+  ['run_start','var(--accent)'], ['user_message','var(--text)'], ['model_request','var(--muted)'],
+  ['model_response','var(--info)'], ['reasoning','var(--text-faint)'], ['tool_call','var(--warn)'],
+  ['tool_result','var(--ok)'], ['retrieval','var(--info)'], ['compaction','var(--muted)'],
+  ['mode_downgraded','var(--warn)'], ['mcp_unavailable','var(--warn)'], ['delegation','var(--accent)'],
+  ['error','var(--err)'], ['run_end','var(--accent)']
+];
+
+const root = document.documentElement;
+let current = 'harbor';
+
+function applyPreset(key) {
+  current = key;
+  const p = PRESETS[key];
+  Object.entries(p.vars).forEach(([k, v]) => root.style.setProperty(k, v));
+  document.querySelectorAll('.preset-btn').forEach(b =>
+    b.setAttribute('aria-pressed', String(b.dataset.key === key)));
+  // sync controls
+  accentPick.value  = p.vars['--accent'];
+  radiusRange.value = parseFloat(p.vars['--radius']);
+  radiusVal.textContent = p.vars['--radius'];
+  unitRange.value   = parseFloat(p.vars['--unit']);
+  unitVal.textContent = p.vars['--unit'];
+}
+
+// build preset buttons
+document.getElementById('presets').innerHTML = Object.entries(PRESETS).map(([k, p]) =>
+  `<button class="preset-btn" data-key="${k}"><span class="swatch" style="background:${p.swatch}"></span>${p.label}</button>`
+).join('');
+document.querySelectorAll('.preset-btn').forEach(b =>
+  b.addEventListener('click', () => applyPreset(b.dataset.key)));
+
+// build event-type filter chips
+document.getElementById('filters').innerHTML =
+  `<button class="chip" data-all aria-pressed="true">all 14</button>` +
+  EVENT_TYPES.map(([t, c]) =>
+    `<button class="chip" data-t="${t}"><span class="dot" style="background:${c}"></span>${t}</button>`
+  ).join('');
+document.querySelectorAll('.chip').forEach(c =>
+  c.addEventListener('click', () => {
+    const on = c.getAttribute('aria-pressed') === 'true';
+    c.setAttribute('aria-pressed', String(!on));
+  }));
+
+// token controls
+accentPick.addEventListener('input', e => root.style.setProperty('--accent', e.target.value));
+radiusRange.addEventListener('input', e => {
+  root.style.setProperty('--radius', e.target.value + 'px');
+  root.style.setProperty('--radius-sm', Math.max(0, e.target.value - 2) + 'px');
+  radiusVal.textContent = e.target.value + 'px';
+});
+unitRange.addEventListener('input', e => {
+  root.style.setProperty('--unit', e.target.value + 'px');
+  unitVal.textContent = e.target.value + 'px';
+});
+fontSel.addEventListener('change', e =>
+  Object.entries(FONTS[e.target.value]).forEach(([k, v]) => root.style.setProperty(k, v)));
+
+// copy tokens
+document.getElementById('copyBtn').addEventListener('click', () => {
+  const keys = Object.keys(PRESETS[current].vars).concat(['--font-ui','--font-mono']);
+  const cs = getComputedStyle(root);
+  const out = ':root {\n' + keys.map(k => `  ${k}: ${cs.getPropertyValue(k).trim()};`).join('\n') + '\n}';
+  const toast = document.getElementById('toast');
+  const done = () => { toast.classList.add('show'); setTimeout(() => toast.classList.remove('show'), 1600); };
+  if (navigator.clipboard) navigator.clipboard.writeText(out).then(done, () => { console.log(out); done(); });
+  else { console.log(out); done(); }
+});
+
+applyPreset('harbor');
+</script>
+</body>
+</html>
