@@ -4,9 +4,24 @@ Self-hosted platform for producing domain-specialized small language models (SLM
 
 Single-operator, trusted-network, one host. Target hardware is **CPU-only** — no service may require a GPU to start.
 
-## Current State — greenfield
+## Current State — 7 of 15 phases built
 
-**There is no application code yet.** The repo holds specs and pipeline scaffolding only; `main` has no commits. Every path referenced below is a *planned* location from a spec's Key Files section, not a file on disk. Verify before assuming any of them exists.
+**This is no longer greenfield.** `main` carries real, tested application code. Paths below mostly exist; check the tree rather than assuming either way.
+
+| | |
+|---|---|
+| **Built** | P0 Compose/schema/skeletons · P1 Ingestion + Corpus API · P2 Model registry + base bindings · P3 Daemon kernel/gateway/event log · P4 Agent definition · P5 Sandbox + built-in tools · P6 Retrieval |
+| **Remaining** | P7 Agent loop · P8 Teams · P9 Dashboard core · P10 Run inspection · P11 Training + eval gate · P12 MCP · P13 Code mode · P14 Egress allowlist |
+| **Code** | `services/daemon/src` ~37 files · `services/forge/armada_forge` ~28 files · 6 migrations · `services/dashboard/src` is empty until P9 |
+| **Tests** | `pytest` (forge) and `npm test` (daemon) both wired and green |
+
+The build plan is `specs/build-plan/build-plan.md` (P0–P14). It **governs** — it is an audited spec and outranks any working note, per the Director ruling that re-cut the queue to its phase boundaries. `build-queue.groovy` holds the live task for each remaining phase.
+
+### Two rules that exist because they were violated
+
+**Tests land with the phase.** A phase is not done without them. This became a rule after the framework was chosen but the per-task acceptance criteria were never added — leaving the rule stated everywhere and enforced nowhere.
+
+**A requirement enforced nowhere is decorative.** This repo has produced the same defect three times: `min_ram_gb` read by nothing, `min_disk_gb` unknown to the schema so its guard could not fire, and the test rule absent from every task. When you add a constraint, add the thing that fails when it is violated.
 
 ## Specs
 
