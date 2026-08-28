@@ -24,6 +24,12 @@ COPY package.json package-lock.json ./
 # package.json and the lock have drifted, which is the behaviour an image build wants.
 RUN npm ci
 
+# index.html IS THE ENTRY MODULE, not an asset. Vite resolves the whole graph from it,
+# so omitting it fails the build with `Could not resolve entry module "index.html"` —
+# which is what happened: this COPY list enumerated tsconfig, vite.config and src/ and
+# left out the one file the bundler starts from. The build passes on a workstation, where
+# the file is simply present, and fails only inside the image.
+COPY index.html ./
 COPY tsconfig.json tsconfig.test.json vite.config.ts ./
 COPY src ./src
 
