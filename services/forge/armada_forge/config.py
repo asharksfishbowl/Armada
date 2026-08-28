@@ -15,6 +15,7 @@ training run has already been paid for in wall-clock time. Failing at boot costs
 
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -420,4 +421,25 @@ def load_config_or_exit(config_dir: Path = CONFIG_DIR) -> ArmadaConfig:
         for error in exc.errors:
             print(f"  - {error}", file=sys.stderr)
         print("", file=sys.stderr)
-        sys.exit(1)
+
+        # os._exit, NOT sys.exit — AND THE FLUSH IS NOT OPTIONAL.
+        #
+        # This runs inside the FastAPI lifespan, which is an async context. sys.exit raises
+        # SystemExit there, and uvicorn unwinds it as a Python traceback ending in
+        # `anext(self.gen)` and a CancelledError. The fault list above is still printed —
+        # it is just no longer the last thing an operator sees, and on a container that
+        # flaps under a restart policy it is the tail that survives in `docker logs`.
+        #
+        # That is not cosmetic. The convention this function exists to serve is that a
+        # misconfiguration names every fault at startup; a traceback burying the list
+        # defeats it while leaving the code looking correct. A smoke assertion reading the
+        # last 40 log lines caught exactly that and reported "startup names the missing
+        # key: observed: return await anext(self.gen)".
+        #
+        # os._exit terminates immediately without raising, so nothing can unwind past it
+        # and the fault list is the final output. It also skips stdio flushing, which is
+        # why the flush below comes first — without it the message is lost entirely, which
+        # would be strictly worse than the traceback.
+        sys.stderr.flush()
+        sys.stdout.flush()
+        os._exit(1)
