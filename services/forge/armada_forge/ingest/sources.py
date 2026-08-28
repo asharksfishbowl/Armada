@@ -27,6 +27,8 @@ from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
+from armada_forge.ingest.directory_source import path_is_within, validate_directory_location
+
 UPLOAD_ROOT = Path("/data/uploads")
 WEB_CRAWL_DEPTH = 2
 WEB_TIMEOUT_SECONDS = 30
@@ -150,26 +152,43 @@ def _fetch_web(location: str) -> FetchedSource:
 
 
 def _fetch_directory(location: str) -> FetchedSource:
-    """A path bind-mounted into the container (R8)."""
-    path = Path(location)
-    if not path.exists():
-        raise SourceFetchError(f"directory does not exist in the container: {location}")
-    if not path.is_dir():
-        raise SourceFetchError(f"not a directory: {location}")
+    """A path bind-mounted into the container (R8).
+
+    RE-VALIDATED HERE, not only at registration. R8b rejects a bad path when the operator
+    registers it, but registration-time-only means the `sources` table is never swept
+    again: a row written before R8b existed, or under a different ARMADA_INGEST_ROOT, would
+    otherwise be walked unbounded at ingestion time. Checking at the point of USE is what
+    makes the rule hold for rows the gate never saw.
+
+    Delegating rather than repeating the checks also keeps one definition of what a valid
+    `directory` Source is. This function previously carried its own exists/is_dir pair and
+    no containment check at all, which is exactly the drift that gets missed.
+    """
+    problem = validate_directory_location(location)
+    if problem:
+        # SourceFetchError, so edge 1 applies: this Source records `failed` with the
+        # message and the remaining Sources still ingest.
+        raise SourceFetchError(problem)
+
     # No cleanup — this is the operator's directory, not ours.
-    return FetchedSource(root=path, cleanup=None)
+    return FetchedSource(root=Path(location).resolve(), cleanup=None)
 
 
 def _fetch_upload(location: str) -> FetchedSource:
     """A previously uploaded blob (R8)."""
     path = UPLOAD_ROOT / location
     # An upload location is operator-supplied, so confine it to UPLOAD_ROOT rather than
-    # trusting it — `../../etc` would otherwise ingest the filesystem.
+    # trusting it — `../../etc` would otherwise ingest the filesystem. Same containment
+    # helper the ingest root uses: one rule, one implementation. Two idioms for "confine a
+    # path to a root" had already drifted apart on `strict=`, and a rule this load-bearing
+    # should not be strengthened in one place and missed in the other.
     try:
         resolved = path.resolve(strict=True)
-        resolved.relative_to(UPLOAD_ROOT.resolve())
-    except (OSError, ValueError) as exc:
+    except OSError as exc:
         raise SourceFetchError(f"upload not found under {UPLOAD_ROOT}: {location}") from exc
+
+    if not path_is_within(resolved, UPLOAD_ROOT.resolve()):
+        raise SourceFetchError(f"upload not found under {UPLOAD_ROOT}: {location}")
 
     if resolved.is_dir():
         return FetchedSource(root=resolved, cleanup=None)

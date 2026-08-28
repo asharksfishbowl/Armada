@@ -122,7 +122,10 @@ def test_an_unreadable_directory_is_refused(ingest_root: Path) -> None:
         if os.access(locked, os.R_OK | os.X_OK):
             pytest.skip("running as a user that bypasses permission bits")
         assert problem is not None
-        assert "not readable" in problem
+        assert "cannot read it" in problem
+        # The mount is :ro, so advising a write-permission fix would be impossible to act
+        # on. The remedy has to be read+execute.
+        assert "read and execute" in problem
     finally:
         os.chmod(locked, 0o755)
 
