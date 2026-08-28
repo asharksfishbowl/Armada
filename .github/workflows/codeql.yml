@@ -78,12 +78,17 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-          # The SAME suite default setup was running (`query_suite: "default"`).
-          # This change is about WHEN CodeQL runs, not what it looks for — swapping
-          # the suite at the same time would change two variables at once and make
-          # any new alert ambiguous between "the trigger moved" and "the queries did".
-          # security-extended is a reasonable later change, on its own commit.
-          queries: security
+          # NO `queries:` INPUT, DELIBERATELY. Omitting it selects the default
+          # code-scanning suite, which is exactly what default setup was running
+          # (`query_suite: "default"`). There is no suite literally named "security" —
+          # the only named values are `security-extended` and `security-and-quality`,
+          # and passing anything else fails the run outright with "Query pack security
+          # cannot be found", which is how this line was got wrong the first time.
+          #
+          # Keeping the suite unchanged is the point: this commit moves WHEN CodeQL
+          # runs, not what it looks for, so a new alert cannot be ambiguous between
+          # "the trigger moved" and "the queries did". security-extended is a
+          # reasonable later change, on its own commit.
 
       # No build step. Neither language is compiled for CodeQL's purposes, which is
       # why both are `build-mode: none` — and why this needs no Docker, unlike the
