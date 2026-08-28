@@ -14,18 +14,25 @@ name: CI
 # has been broken upstream and the fix belongs there, not here.
 # ─────────────────────────────────────────────────────────────────────────────
 
+# WHEN THIS RUNS: on merge to main, not on raising a PR.
+#
+# A PR-time run tested a merge commit that did not exist yet, then main re-tested the
+# same tree minutes later and every change appeared to fire CI twice. Testing the merge
+# result once, on main, is the same coverage without the double report.
+#
+# The trade, stated because it is real: nothing gates the merge. CI here DETECTS a
+# regression on main rather than PREVENTING it from landing, and a branch-protection
+# rule cannot require a check that never runs on a PR. Recovery is roll forward.
 on:
   push:
     branches: [main]
-    paths-ignore: &docs
+    paths-ignore:
       - '**/*.md'
       - 'docs/**'
       - 'specs/**'
       - 'design-references/**'
       - 'LICENSE'
       - 'THIRD_PARTY_NOTICES.md'
-  pull_request:
-    paths-ignore: *docs
   workflow_dispatch:
 
 concurrency:
@@ -37,17 +44,11 @@ permissions:
 
 jobs:
   # ───────────────────────────────────────────────────────────────────────────
-  # The fast guard. Every push and every PR. No Docker, target under 2 minutes.
+  # The fast guard. No Docker, target under 2 minutes. Gates the 15-minute stack
+  # boot below, so a red unit suite costs one runner-minute instead of twenty.
   # ───────────────────────────────────────────────────────────────────────────
   unit:
     name: Unit tests
-    # PRs only. Every push to main here arrives via an auto-merged PR whose unit run
-    # already covered the identical tree, so re-running it on main tested nothing new and
-    # made every change look like it fired CI twice.
-    #
-    # workflow_dispatch keeps a manual escape hatch for a direct push to main, which is
-    # the one path this skips.
-    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -93,9 +94,10 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────
   smoke:
     name: Smoke test (full stack)
-    # No `needs: unit` — unit does not run on push, and a needs on a skipped job would
-    # skip smoke too, silently removing the only end-to-end check in the pipeline.
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    # `needs: unit` is safe again now that unit runs on the same events this does. It was
+    # removed when unit was PR-only, because a `needs` on a SKIPPED job skips the dependent
+    # too — which would have silently deleted the only end-to-end check in the pipeline.
+    needs: unit
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
