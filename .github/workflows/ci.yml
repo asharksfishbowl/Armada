@@ -35,9 +35,27 @@ on:
       - 'THIRD_PARTY_NOTICES.md'
   workflow_dispatch:
 
+# NEVER CANCEL A RUN THAT IS THE ONLY VERIFICATION A COMMIT WILL EVER GET.
+#
+# This was `cancel-in-progress: true`, carried over from when CI also ran on pull
+# requests and superseding a run was free — the PR would be tested again anyway.
+# It is not free now. Since CI runs only on the merge to main, each run is the sole
+# end-to-end check of one commit, and cancelling it means that commit is never
+# verified by anything.
+#
+# It had already happened three times when this was found: f9ce33f, d72272a and
+# eeb6d86 all show `conclusion: cancelled` because the next merge landed while their
+# smoke job was still booting the stack. Nothing reported a gap — a cancelled run is
+# not a red run, so main looked fine while three commits had been checked by nothing.
+#
+# The trade is latency: merges now queue instead of superseding, and the smoke job
+# takes minutes. That is the correct direction. A slow answer about every commit
+# beats a fast answer about some of them.
+#
+# The group is kept so runs still serialise rather than piling up concurrently.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
