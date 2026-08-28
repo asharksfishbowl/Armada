@@ -1,0 +1,94 @@
+name: CodeQL
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ADVANCED SETUP, ON PURPOSE — this file exists to control WHEN CodeQL runs.
+#
+# CodeQL was previously on GitHub's *default setup*, configured in Settings rather
+# than in the repo. Default setup runs on both `pull_request` AND `push` to the
+# default branch, and its API exposes only languages, query suite, threat model
+# and the weekly schedule — there is NO trigger configuration. So every change
+# produced two CodeQL runs ("PR #18" and "Push on main"), which is exactly the
+# double-firing that ci.yml was already changed to stop.
+#
+# Moving to advanced setup puts the triggers here, where they match CI's: once,
+# on the merge to main. The cost is that this file now owns the action versions
+# that default setup used to keep current — bump them with the rest.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    branches: [main]
+    # Same list as ci.yml. A docs-only commit changes no analysable code, so
+    # scanning it re-derives an identical result at full cost.
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'specs/**'
+      - 'design-references/**'
+      - 'LICENSE'
+      - 'THIRD_PARTY_NOTICES.md'
+
+  # The one schedule worth keeping. It does not duplicate a per-change run — it
+  # catches NEW CodeQL queries finding old bugs in code that has not changed,
+  # which no push-triggered run can ever do.
+  schedule:
+    - cron: '27 5 * * 1'
+
+  workflow_dispatch:
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      security-events: write   # required to upload results
+      packages: read
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # `javascript-typescript` covers BOTH the daemon and the dashboard in one
+          # extractor. Default setup listed `javascript`, `typescript` AND
+          # `javascript-typescript`, which are aliases of the same thing — three
+          # names for one analysis.
+          - language: javascript-typescript
+            build-mode: none
+          - language: python
+            build-mode: none
+          # Scans the workflow files in this directory. Worth keeping: CI runs with
+          # `contents: read` and no secrets by design, and this is what notices if
+          # that ever stops being true.
+          - language: actions
+            build-mode: none
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # The SAME suite default setup was running (`query_suite: "default"`).
+          # This change is about WHEN CodeQL runs, not what it looks for — swapping
+          # the suite at the same time would change two variables at once and make
+          # any new alert ambiguous between "the trigger moved" and "the queries did".
+          # security-extended is a reasonable later change, on its own commit.
+          queries: security
+
+      # No build step. Neither language is compiled for CodeQL's purposes, which is
+      # why both are `build-mode: none` — and why this needs no Docker, unlike the
+      # smoke job in ci.yml.
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
