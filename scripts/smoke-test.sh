@@ -443,9 +443,34 @@ MD
     if [ -n "$corpus_id" ] && [ "$corpus_id" != "null" ]; then
         pass 'Corpus created'
 
-        api -X POST "${FORGE}/corpora/${corpus_id}/sources" -H 'Content-Type: application/json' \
-            -d "{\"type\":\"directory\",\"location\":\"${fixture}\",\"include_globs\":[\"**/*.md\"]}" >/dev/null
-        api -X POST "${FORGE}/corpora/${corpus_id}/ingest" >/dev/null
+        # ASSERT THE SETUP, DO NOT ASSUME IT. Both calls discarded their responses, so a
+        # rejected registration was invisible: the ingest then ran over a Corpus with no
+        # Sources, produced zero chunks, and section 7 reported "ingestion produced
+        # chunks: 0" — a true statement that names the wrong cause. Three runs were spent
+        # reading that as an ingestion bug.
+        #
+        # R8b gave add_source the power to refuse, which is right, and that made a silent
+        # setup step actively misleading rather than merely incomplete.
+        src_out="$(mktemp)"
+        src_code="$(curl -sS --max-time 30 -o "$src_out" -w '%{http_code}' \
+            -X POST "${FORGE}/corpora/${corpus_id}/sources" \
+            -H 'Content-Type: application/json' \
+            -d "{\"type\":\"directory\",\"location\":\"${fixture}\",\"include_globs\":[\"**/*.md\"]}" 2>/dev/null)"
+        if [ "$src_code" = "201" ]; then
+            pass 'directory Source registered (R6, R8b)'
+        else
+            # The body is the whole point: R8b's refusal names the path, ARMADA_INGEST_ROOT
+            # and the remedy, so printing it turns a dead end into an instruction.
+            fail 'directory Source registered (R6, R8b)' '201' \
+                 "$src_code — $(head -c 400 "$src_out" 2>/dev/null)"
+        fi
+        rm -f "$src_out"
+
+        ingest_code="$(api_code -X POST "${FORGE}/corpora/${corpus_id}/ingest")"
+        case "$ingest_code" in
+            200|202) pass 'ingest accepted (R7)' ;;
+            *)       fail 'ingest accepted (R7)' '200 or 202' "$ingest_code" ;;
+        esac
 
         chunks=0
         for _ in $(seq 1 60); do
