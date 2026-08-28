@@ -76,7 +76,9 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: services/daemon/package-lock.json
+          cache-dependency-path: |
+            services/daemon/package-lock.json
+            services/dashboard/package-lock.json
 
       # `tsc && node --test`. Node 22 ships the test runner, so there is no
       # framework dependency to install or license.
@@ -85,6 +87,27 @@ jobs:
         run: |
           npm ci
           npm test
+
+      # THE DASHBOARD SUITE RAN NOWHERE UNTIL THIS STEP EXISTED.
+      #
+      # P9 landed 42 passing tests and no CI step to run them. That is the ninth instance
+      # of this repo's signature defect — something written, working, and never called —
+      # except here it is the test suite itself, which is the thing that is supposed to
+      # catch the other eight.
+      #
+      # `npm ci` and not `npm install`: the lockfile is the point, and install would
+      # silently resolve a different tree than the one that was reviewed.
+      - name: dashboard — npm ci && npm test
+        working-directory: services/dashboard
+        run: |
+          npm ci
+          npm test
+
+      # The bundle must actually build. A dashboard whose tests pass and whose build fails
+      # is not shippable, and `tsc` in the test script only type-checks the test tree.
+      - name: dashboard — npm run build
+        working-directory: services/dashboard
+        run: npm run build
 
       - uses: actions/setup-python@v7
         with:
