@@ -19,16 +19,26 @@
 # are still errors.
 set -uo pipefail
 
-# ── WHERE THE WORKSPACE FIXTURE GOES ─────────────────────────────────────────
-# Section 7 needs a directory that BOTH the daemon and a sandbox container can see. There
-# is no /workspace/docs mount and inventing one would not work. P5 introduced
-# ARMADA_WORKSPACE_ROOT, bind-mounted at the SAME path on both sides of the daemon
-# container — it is the one path the daemon and Docker agree on, so the fixture lives
-# under it.
+# ── TWO ROOTS, AND THEY ARE NOT INTERCHANGEABLE ──────────────────────────────
+# Both are bind-mounted at the SAME path on both sides of their container, so a path this
+# script writes is the path the service opens. That is where the resemblance ends.
+#
+#   ARMADA_WORKSPACE_ROOT  the DAEMON's, and WRITABLE. It exists so the daemon can hand
+#                          Docker a host path when provisioning a sandbox (R45c).
+#   ARMADA_INGEST_ROOT     FORGE's, and READ-ONLY. Where a `directory` Source may read
+#                          from (R8a).
+#
+# SECTION 7's CORPUS FIXTURE BELONGS UNDER THE INGEST ROOT. Forge is the process that
+# reads it, and forge cannot see the workspace root at all — writing the fixture there was
+# precisely the defect section 7 kept reporting: the glob matched nothing, and the ingest
+# announced success over an empty tree. A `directory` Source outside the ingest root is now
+# refused outright at registration (R8b), so putting it back would fail loudly rather than
+# silently, but it would still be wrong.
+#
+# Do not merge these into one mount. Sharing would give sandboxes write access to corpus
+# source material and couple sandbox provisioning to ingestion across cross-service
+# boundary 1, where forge writes the index and the daemon only ever reads it.
 ARMADA_WORKSPACE_ROOT="${ARMADA_WORKSPACE_ROOT:-/var/lib/armada/workspaces}"
-# R8a — forge's ingest root is a SEPARATE mount from the daemon's workspace root, and
-# deliberately so: sharing one would couple sandbox provisioning to corpus ingestion
-# across cross-service boundary 1.
 ARMADA_INGEST_ROOT="${ARMADA_INGEST_ROOT:-/var/lib/armada/ingest}"
 
 # Ports and their override names already exist in docker-compose.yml. Reused, not invented.
@@ -224,7 +234,16 @@ else
 fi
 
 # R1b — `backend` is a LOGICAL name. No deployment URL is ever persisted.
-if echo "$bindings" | jq -e '[.[] | select(.backend | test("http"))] | length == 0' >/dev/null 2>&1; then
+#
+# GATED ON THE BASELINE (cross-cutting rule 10). "No backend contains http" is an ABSENCE
+# assertion, and absence is free over an empty set: if the registry returned nothing at
+# all, this passes and reports that the discriminator holds. A total registration failure
+# would then be announced as a PASS. The count check above establishes the baseline, so
+# reuse it rather than re-deriving one.
+if [ "${count:-0}" != "5" ]; then
+    skip 'backend is a logical name, no URL persisted (R1b)' \
+         'no bindings were registered — an absence assertion over an empty set proves nothing'
+elif echo "$bindings" | jq -e '[.[] | select(.backend | test("http"))] | length == 0' >/dev/null 2>&1; then
     pass 'backend is a logical name, no URL persisted (R1b)'
 else
     fail 'backend is a logical name, no URL persisted (R1b)' 'no backend containing "http"' \
