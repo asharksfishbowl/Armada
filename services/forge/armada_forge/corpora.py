@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from armada_forge import db
 from armada_forge.ingest import job as ingest_job
+from armada_forge.ingest.directory_source import validate_directory_location
 
 router = APIRouter()
 
@@ -161,6 +162,23 @@ def add_source(corpus_id: str, payload: SourceCreate) -> dict[str, Any]:
             status_code=400,
             detail=f"type `{payload.type}` must be one of {', '.join(sorted(VALID_SOURCE_TYPES))}",
         )
+
+    # R8b — a `directory` Source names a path forge opens from INSIDE its container. An
+    # unmounted path is simply not there, and the old behaviour was to walk an empty tree
+    # and report success. Rejected HERE, where the operator is standing, and BEFORE any
+    # row is written: a rejected registration that left a row behind would reproduce the
+    # original defect one layer down, since ingestion would walk the unreadable path
+    # exactly as before.
+    #
+    # Only `directory` is checked, and that is the honest shape rather than a gap: `git`
+    # and `web` could only be validated by reaching the network, which would turn this
+    # endpoint into an egress call on a platform whose default path deliberately makes
+    # none; `upload` is already confined to UPLOAD_ROOT in sources.py and fails loudly via
+    # edge 1. `directory` is the one type with a locally-checkable, silently-empty failure.
+    if payload.type == "directory":
+        problem = validate_directory_location(payload.location)
+        if problem:
+            raise HTTPException(status_code=400, detail=problem)
 
     row = db.query_one(
         """

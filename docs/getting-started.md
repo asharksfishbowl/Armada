@@ -291,6 +291,47 @@ per-container host allowlist; it needs a proxy subsystem, which is a later phase
 declaring it fails config load naming the mode — because a profile that asked for filtered
 egress and quietly received none would still *look* like it was filtering.
 
+## Corpora and the ingest root
+
+A `directory` Source names a path, but **forge reads it from inside its own container** —
+so a path that is not mounted is simply not there.
+
+**`ARMADA_INGEST_ROOT`** (default `/var/lib/armada/ingest`) is where corpus source material
+goes. It is bind-mounted **read-only** into `armada-forge` at the same path on both sides,
+for the same reason the workspace root is: a path you type is the path forge opens, so an
+error message never names a location that does not exist for you.
+
+```bash
+sudo mkdir -p /var/lib/armada/ingest
+sudo chown "$USER" /var/lib/armada/ingest
+cp -r ~/my-docs /var/lib/armada/ingest/
+```
+
+Then register it by the path as it appears on the host:
+
+```bash
+curl -X POST localhost:8000/corpora/$CORPUS_ID/sources \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"directory","location":"/var/lib/armada/ingest/my-docs","include_globs":["**/*.md"]}'
+```
+
+**A path outside the root is refused with a 400** naming the path, the root, and what to
+change. Paths that escape by `..` or through a symlink are refused too — containment is
+checked after resolution. This fails at registration rather than at ingestion deliberately:
+it fails while you are standing there, instead of much later and quietly.
+
+**It is not `ARMADA_WORKSPACE_ROOT`.** That root is the daemon's, it is writable, and it
+exists so Docker can be handed a host path when provisioning a sandbox. This one is
+read-only source material for forge. Sharing a single mount would hand sandboxes write
+access to your corpus inputs.
+
+**An ingestion where every Source matched zero files fails**, and the error names each
+Source and its match count. Zero files from a Source you explicitly registered is a
+misconfiguration, not an empty result — reporting it as success is how a broken corpus goes
+unnoticed until a Run gives bad answers. One stale Source among several still completes:
+the job succeeds, the working Sources are ingested, and the stale one is recorded
+`zero_matches` in the job's `source_results` so it is still visible.
+
 ## Configuration reference
 
 All under `config/`, mounted read-only into the services.
@@ -333,3 +374,16 @@ migrations are skipped.
 `retired` or `missing` — usually because an entry was removed from `base-models.yaml`.
 Armada never re-resolves a pinned reference on its own; call
 `POST /api/agents/{agent_id}/refresh-bindings` to adopt the current one deliberately.
+
+**Adding a `directory` Source returns 400.** The path is not under `ARMADA_INGEST_ROOT`, or
+does not exist inside forge. Copy the content under the root (default
+`/var/lib/armada/ingest`) and register it by its host path — see *Corpora and the ingest
+root* above. If you changed `ARMADA_INGEST_ROOT`, restart `armada-forge`: the variable sets
+both the mount and the check, so an unrestarted container is still enforcing the old root.
+
+**An ingestion finished `failed` saying every Source yielded zero extractable files.** The
+message distinguishes the two causes, because they have different fixes. *"The globs matched
+no files"* means nothing was walked — check the path is really mounted and remember `*.md`
+matches only the top level while `**/*.md` recurses. *"Matched N files, but none produced
+any text"* means the files were found and could not be read — check their extensions are in
+`config/code-extensions.yaml` and that they are not empty.
