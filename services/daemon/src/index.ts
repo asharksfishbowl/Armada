@@ -138,7 +138,9 @@ const factories: FactoryTables = {
           );
           return rows.rows[0]?.resolved_snapshot?.tools ?? [];
         },
-        retrieval: kernelRef().get('RetrievalProvider'),
+        // Called at USE, not here. Invoking it in this factory body is exactly what broke
+        // boot: the factory runs DURING Kernel.register, when `kernel` is still unassigned.
+        retrieval: () => kernelRef().get('RetrievalProvider'),
         searchOptions: {
           searchMaxK: Number(
             (runtimeConfig['retrieval'] as { search_max_k?: number } | undefined)?.search_max_k ?? 10,
