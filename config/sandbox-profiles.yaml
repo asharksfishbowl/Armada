@@ -8,22 +8,48 @@
 # It is also why Code mode is restricted to sandbox-local tools (R27a): there is no
 # callback channel to carry an MCP call or a retrieval query.
 #
-# `network: egress_allowlist` IS NOT IMPLEMENTED (roadmap F5). Docker has no per-container
-# egress ACL primitive; implementing R47 needs a per-Run internal bridge plus a
-# constrained forward-proxy sidecar, which is deferred to its own backlog task. A profile
-# declaring it is REJECTED AT CONFIG LOAD with an error naming the unimplemented mode.
-# It is NOT silently downgraded to `none` — a profile that asked for a restricted network
-# and quietly got no network would be a security fault waiting to be misread as working.
+# `network: egress_allowlist` IS IMPLEMENTED AS OF PHASE 14 (R47, build-plan D7). Docker
+# has no per-container egress ACL primitive, so the mode is a subsystem rather than a flag:
+# per Run the daemon creates an `--internal` bridge — which Docker gives no route off the
+# host — and puts a single forward-proxy container on it, joined to the default bridge on
+# its other side. The sandbox gets HTTP_PROXY/HTTPS_PROXY and a resolver pointed at its own
+# loopback, so it has no route and no external DNS; the proxy holds the allowlist.
+#
+# WHAT IT BLOCKS: every destination the sandbox dials itself, by name OR BY DIRECT IP,
+# because there is no route. Non-HTTP protocols are not proxied and so do not work at all.
+# WHAT IT DOES NOT: a second name served by an allowed host's IP address — CONNECT is an
+# opaque tunnel and the proxy cannot see inside TLS.
+# It is still never downgraded: a profile declaring the mode with no `egress.proxy_image`,
+# an empty `allowed_hosts`, or an unparseable entry is REFUSED AT CONFIG LOAD naming every
+# fault. A profile that asked for a restricted network and quietly got none would be a
+# security fault waiting to be misread as working.
+#
+# THE DEFAULT PATH IS UNCHANGED. Both shipped profiles are `network: none`; the allowlist
+# is opt-in, costs nothing when unused, and provisions no extra container for a `none` Run.
 #
 # Keys per profile (R44):
 #   image              string
 #   cpu_limit          float, cores
 #   memory_limit       string, docker memory syntax
-#   network            `none` only for now; `egress_allowlist` fails config load
-#   allowed_hosts      list of strings, used only by egress_allowlist
+#   network            `none` or `egress_allowlist`
+#   allowed_hosts      list of strings, used only by egress_allowlist. Each entry is
+#                      `host`, `*.host` (subdomains only, never the apex), or `host:port`.
+#                      Without a port an entry covers 80 and 443. A URL, a bare `*`, a
+#                      single-label name, or a private/loopback IP is refused at load.
 #   read_only_root     bool
 #   armada_tmpfs_size  string, default 64m
 #   timeout_seconds    int, per tool call (edge 5)
+
+# The egress subsystem. Required ONLY when a profile below declares `egress_allowlist`;
+# absent, nothing reads it. `proxy_image` must be an image carrying the daemon's `dist/` —
+# the armada-daemon image — because the proxy runs `node /app/dist/sandbox/egress-proxy.js`
+# from it. Compose builds that image as `<project>-armada-daemon`, so with `name: armada`
+# in docker-compose.yml it is `armada-armada-daemon`. ARMADA_EGRESS_PROXY_IMAGE overrides
+# this, which is how a deployment names its own without editing a read-only mount.
+#
+# egress:
+#   proxy_image: armada-armada-daemon
+#   proxy_port: 3128
 
 profiles:
   # Agent Definition R34 — agents/frontend-engineer.yaml binds this profile and grants
@@ -55,3 +81,25 @@ profiles:
     read_only_root: true
     armada_tmpfs_size: 64m
     timeout_seconds: 120
+
+  # OPT-IN EXAMPLE — commented out deliberately. Uncommenting it, and the `egress:` block
+  # above, is the entire change; nothing else in Armada moves. Note that egress is the
+  # ONLY thing it adds: the container is still non-root, still capability-free, and still
+  # never holds the Docker socket.
+  #
+  # An allowlist widens what a sandbox may reach OUT to. It never opens a path back in —
+  # the proxy refuses any target resolving to a private, loopback or link-local address,
+  # which is where armada-daemon, armada-db, armada-forge, armada-models and every
+  # host-published port live (invariant 3).
+  #
+  # npm:
+  #   image: node:22-bookworm-slim
+  #   cpu_limit: 2.0
+  #   memory_limit: 2g
+  #   network: egress_allowlist
+  #   allowed_hosts:
+  #     - registry.npmjs.org
+  #     - "*.npmjs.org"
+  #   read_only_root: false
+  #   armada_tmpfs_size: 128m
+  #   timeout_seconds: 300

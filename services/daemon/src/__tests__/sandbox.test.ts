@@ -45,10 +45,16 @@ const PROFILE: SandboxProfile = {
   timeout_seconds: 120,
 };
 
-describe('build-plan Req 29 — egress_allowlist is REFUSED, never downgraded', () => {
-  test('a profile declaring egress_allowlist fails config load naming the mode', () => {
+describe('build-plan Req 29 — network policy is never silently downgraded', () => {
+  // P14 implements `egress_allowlist` (see egress.test.ts for the subsystem). Req 29's
+  // rule survives it unchanged: the mode is REFUSED whenever the subsystem behind it
+  // cannot be provisioned, and it is never quietly turned into `none`. An empty
+  // environment here means no proxy image is configured, so nothing can be.
+  const NO_ENV: Record<string, string | undefined> = {};
+
+  test('an unprovisionable egress_allowlist profile fails config load naming the mode', () => {
     assert.throws(
-      () => validateProfiles({ risky: { ...PROFILE, network: 'egress_allowlist' } }),
+      () => validateProfiles({ risky: { ...PROFILE, network: 'egress_allowlist' } }, {}, NO_ENV),
       (err: unknown) => {
         assert.ok(err instanceof SandboxConfigError);
         assert.match(err.message, /egress_allowlist/);
@@ -63,7 +69,7 @@ describe('build-plan Req 29 — egress_allowlist is REFUSED, never downgraded', 
     // day the allowlist lands behaviour changes with no config edit.
     let downgraded: Record<string, SandboxProfile> | null = null;
     try {
-      downgraded = validateProfiles({ risky: { ...PROFILE, network: 'egress_allowlist' } });
+      downgraded = validateProfiles({ risky: { ...PROFILE, network: 'egress_allowlist' } }, {}, NO_ENV);
     } catch {
       /* expected */
     }
@@ -71,16 +77,23 @@ describe('build-plan Req 29 — egress_allowlist is REFUSED, never downgraded', 
   });
 
   test('the shipped profiles validate and are all network: none', () => {
-    const validated = validateProfiles({
-      node: { ...PROFILE, read_only_root: false },
-      minimal: PROFILE,
-    });
+    const validated = validateProfiles(
+      {
+        node: { ...PROFILE, read_only_root: false },
+        minimal: PROFILE,
+      },
+      {},
+      NO_ENV,
+    );
     assert.deepEqual(Object.keys(validated).sort(), ['minimal', 'node']);
     assert.ok(Object.values(validated).every((p) => p.network === 'none'));
+    // A `none` profile carries no resolved egress block, so nothing downstream can
+    // mistake it for a filtered one.
+    assert.ok(Object.values(validated).every((p) => p.egress === undefined));
   });
 
   test('armada_tmpfs_size defaults rather than being omittable (R44a)', () => {
-    const validated = validateProfiles({ p: { image: 'x', network: 'none' } });
+    const validated = validateProfiles({ p: { image: 'x', network: 'none' } }, {}, NO_ENV);
     // /armada must exist on EVERY sandbox or spill and Code mode break under a read-only
     // root, so this cannot be left unset.
     assert.equal(validated['p']!.armada_tmpfs_size, '64m');

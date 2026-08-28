@@ -28,11 +28,33 @@
  * path it has actually mounted, and Docker resolves that same path against the host when
  * it creates the container. The spec forbids the stat approach explicitly; this
  * implementation follows the mounted-root form.
+ *
+ * ── P14: `egress_allowlist` IS NOW REAL, WHICH IS WHY IT IS NO LONGER REFUSED ─
+ * Build-plan Req 29 refused the mode at config load "before Phase 14", on the grounds that
+ * a profile appearing to filter egress while filtering nothing is worse than an honest
+ * rejection. This is Phase 14. The mode is accepted ONLY when the subsystem behind it can
+ * actually be provisioned — `egress.proxy_image` must be configured, and every
+ * `allowed_hosts` entry must parse — and it is still refused, naming every fault, when it
+ * cannot. The mechanism and its honest limits are documented in `egress.ts`.
  */
 
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { access, stat } from 'node:fs/promises';
 import { isAbsolute, resolve, sep } from 'node:path';
+import {
+  DEFAULT_PROXY_PORT,
+  EGRESS_NETWORK_PREFIX,
+  PROXY_ALIAS,
+  PROXY_IMAGE_ENV,
+  PROXY_READY_LINE,
+  buildNetworkConnectArgs,
+  buildNetworkCreateArgs,
+  buildProxyCreateArgs,
+  egressNetworkName,
+  parseAllowedHost,
+  type HostRule,
+  type ResolvedEgress,
+} from './egress.js';
 import type {
   ExecResult,
   Sandbox,
@@ -54,64 +76,134 @@ export interface SandboxProfile {
   read_only_root: boolean;
   armada_tmpfs_size: string;
   timeout_seconds: number;
+  /**
+   * Present if and only if `network` is `egress_allowlist`. Resolved at config load, so
+   * nothing downstream re-derives an allowlist from raw YAML at Run time.
+   */
+  egress?: ResolvedEgress;
+}
+
+/** The optional `egress:` block of config/sandbox-profiles.yaml. */
+export interface EgressSubsystemConfig {
+  proxy_image?: unknown;
+  proxy_port?: unknown;
 }
 
 export class SandboxConfigError extends Error {}
 
 /**
- * Validate profiles at CONFIG LOAD — build-plan Req 29.
+ * Validate profiles at CONFIG LOAD — build-plan Req 29, Agent Runtime R44/R47.
  *
- * `network: egress_allowlist` is REJECTED, naming the unimplemented mode. It is NOT
- * silently downgraded to `none`.
+ * EVERY fault in the file is collected and reported at once. A daemon that exits on the
+ * first bad `allowed_hosts` entry costs an operator one restart per typo.
  *
- * The downgrade would be the security fault: a profile that asked for a restricted network
- * and quietly received no network at all still *looks* like it is enforcing an allowlist.
- * An operator reading the config would believe egress is filtered to `allowed_hosts` when
- * in fact nothing is filtered because nothing is reachable — and the day the allowlist
- * lands in P14, behaviour would change under them with no config edit. Failing loudly is
- * the only honest option.
+ * `network: egress_allowlist` is accepted only when the subsystem that implements it can
+ * actually be provisioned. When it cannot, the profile is REFUSED, naming what is missing
+ * — never downgraded to `none`. The downgrade is the security fault Req 29 named: a
+ * profile that asked for a restricted network and quietly received no network still
+ * *looks* like it is enforcing an allowlist, and an operator reading the config would
+ * believe egress is filtered to `allowed_hosts` when nothing is filtered at all.
  */
 export function validateProfiles(
   profiles: Record<string, Partial<SandboxProfile>>,
+  egressConfig?: unknown,
+  env: Record<string, string | undefined> = process.env,
 ): Record<string, SandboxProfile> {
   const problems: string[] = [];
   const validated: Record<string, SandboxProfile> = {};
 
-  for (const [name, profile] of Object.entries(profiles)) {
-    if (profile.network === 'egress_allowlist') {
+  const block = (egressConfig ?? {}) as EgressSubsystemConfig;
+  // An env var overrides the file so a deployment can name its own image without editing
+  // config, which is mounted read-only.
+  const proxyImageRaw = env[PROXY_IMAGE_ENV] ?? block.proxy_image;
+  const proxyImage = typeof proxyImageRaw === 'string' ? proxyImageRaw.trim() : '';
+  let proxyPort = DEFAULT_PROXY_PORT;
+  if (block.proxy_port !== undefined) {
+    const port = Number(block.proxy_port);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
       problems.push(
-        `config/sandbox-profiles.yaml: profile \`${name}\` declares ` +
-          '`network: egress_allowlist`, which is not implemented. Docker has no ' +
-          'per-container host allowlist; it needs an internal bridge plus a constrained ' +
-          'forward proxy, which lands in a later phase. Use `network: none`. ' +
-          'This is refused rather than downgraded so a profile can never appear to ' +
-          'filter egress while filtering nothing.',
+        `config/sandbox-profiles.yaml: \`egress.proxy_port\` is \`${String(block.proxy_port)}\`; it must be an integer port`,
       );
-      continue;
+    } else {
+      proxyPort = port;
     }
-    if (profile.network !== 'none') {
+  }
+
+  for (const [name, profile] of Object.entries(profiles)) {
+    const where = `config/sandbox-profiles.yaml: profile \`${name}\``;
+    const network = profile.network;
+
+    if (network !== 'none' && network !== 'egress_allowlist') {
       problems.push(
-        `config/sandbox-profiles.yaml: profile \`${name}\` has network \`${String(profile.network)}\`; ` +
-          'the only supported value is `none`',
+        `${where} has network \`${String(network)}\`; supported values are \`none\` and \`egress_allowlist\``,
       );
       continue;
     }
     if (!profile.image) {
-      problems.push(`config/sandbox-profiles.yaml: profile \`${name}\` is missing \`image\``);
+      problems.push(`${where} is missing \`image\``);
       continue;
+    }
+
+    const allowedHosts = profile.allowed_hosts ?? [];
+    let egress: ResolvedEgress | undefined;
+
+    if (network === 'egress_allowlist') {
+      const rules: HostRule[] = [];
+      if (!Array.isArray(allowedHosts) || allowedHosts.length === 0) {
+        problems.push(
+          `${where} declares \`network: egress_allowlist\` with no \`allowed_hosts\`. An empty ` +
+            'allowlist reaches nothing while looking like it filters something; use ' +
+            '`network: none` if the sandbox should have no egress.',
+        );
+      } else {
+        for (const entry of allowedHosts) {
+          const parsed = parseAllowedHost(entry);
+          if (parsed.ok) rules.push(parsed.rule);
+          else problems.push(`${where}: \`allowed_hosts\` ${parsed.error}`);
+        }
+      }
+
+      if (proxyImage === '') {
+        // Refusing here is the P14 form of Req 29. The mode is implemented, but this
+        // deployment cannot provision the proxy, so the profile would filter nothing.
+        problems.push(
+          `${where} declares \`network: egress_allowlist\`, but no egress proxy image is ` +
+            `configured. Set \`egress.proxy_image\` in config/sandbox-profiles.yaml or ` +
+            `${PROXY_IMAGE_ENV} in the environment to an image carrying the daemon's ` +
+            '`dist/` (the armada-daemon image). This is refused rather than downgraded to ' +
+            '`none` so a profile can never appear to filter egress while filtering nothing.',
+        );
+      }
+
+      if (rules.length > 0 && proxyImage !== '') {
+        egress = {
+          proxyImage,
+          proxyPort,
+          allowedHosts: allowedHosts.map(String),
+          rules,
+        };
+      }
+    } else if (Array.isArray(allowedHosts) && allowedHosts.length > 0) {
+      // A requirement enforced nowhere is decorative, and so is a host list that filters
+      // nothing. Say so at boot rather than letting it read as a working allowlist.
+      problems.push(
+        `${where} lists \`allowed_hosts\` under \`network: none\`, where the list is never ` +
+          'consulted. Either declare `network: egress_allowlist` or remove the list.',
+      );
     }
 
     validated[name] = {
       image: profile.image,
       cpu_limit: profile.cpu_limit ?? 1,
       memory_limit: profile.memory_limit ?? '512m',
-      network: 'none',
-      allowed_hosts: profile.allowed_hosts ?? [],
+      network,
+      allowed_hosts: Array.isArray(allowedHosts) ? allowedHosts.map(String) : [],
       read_only_root: profile.read_only_root ?? false,
       // R44a — a default rather than an option to omit: /armada must exist on every
       // sandbox or spill and Code mode break under read_only_root.
       armada_tmpfs_size: profile.armada_tmpfs_size ?? '64m',
       timeout_seconds: profile.timeout_seconds ?? 300,
+      ...(egress ? { egress } : {}),
     };
   }
 
@@ -173,7 +265,22 @@ export function buildCreateArgs(
   spec: SandboxSpec,
   profile: SandboxProfile,
   workspacePath: string | null,
+  egressNetwork?: { networkName: string; proxyPort: number },
 ): string[] {
+  // The two modes are mutually exclusive and the mismatch is a bug, not a fallback. A
+  // caller that passed no network for an allowlist profile would otherwise get `none`,
+  // which is the silent downgrade Req 29 exists to forbid; a caller that passed one for a
+  // `none` profile would have opened egress nobody asked for.
+  if (profile.network === 'egress_allowlist' && !egressNetwork) {
+    throw new Error(
+      'an `egress_allowlist` profile needs its per-Run internal network; refusing to ' +
+        'create the sandbox on `none`, which would look like a filtered network',
+    );
+  }
+  if (profile.network === 'none' && egressNetwork) {
+    throw new Error('a `network: none` profile must not be attached to an egress network');
+  }
+
   const args = [
     'run',
     '--detach',
@@ -185,9 +292,9 @@ export function buildCreateArgs(
     '--cap-drop', 'ALL',
     // Blocks setuid escalation inside the container even if the image ships one.
     '--security-opt', 'no-new-privileges',
-    // build-plan Req 29 — `none` only. Validated at config load; restated here so the
-    // container is correct even if it were ever constructed directly.
-    '--network', 'none',
+    // Either no network at all, or the per-Run `--internal` bridge whose only other
+    // member is the egress proxy. There is no third option and no default that opens one.
+    '--network', egressNetwork ? egressNetwork.networkName : 'none',
     '--cpus', String(profile.cpu_limit),
     '--memory', profile.memory_limit,
     // R44a — /armada is a writable tmpfs REGARDLESS of read_only_root. This is what keeps
@@ -196,6 +303,21 @@ export function buildCreateArgs(
     '--tmpfs', `/armada:rw,size=${profile.armada_tmpfs_size},mode=1777`,
     '--workdir', '/workspace',
   ];
+
+  if (egressNetwork) {
+    const proxyUrl = `http://${PROXY_ALIAS}:${egressNetwork.proxyPort}`;
+    // Lowercase AND uppercase: curl reads `http_proxy`, most everything else reads the
+    // uppercase pair, and a client that reads neither simply has no route at all.
+    for (const name of ['HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'https_proxy']) {
+      args.push('--env', `${name}=${proxyUrl}`);
+    }
+    // DNS CONTROL. On an `--internal` network there is no route to a forwarder anyway;
+    // pointing the container's resolver at its own loopback makes external resolution fail
+    // deterministically rather than depending on that, which closes DNS as an
+    // exfiltration channel. Docker's embedded resolver still answers the proxy's alias,
+    // because container names are answered authoritatively and never forwarded.
+    args.push('--dns', '127.0.0.1');
+  }
 
   if (profile.read_only_root) args.push('--read-only');
 
@@ -250,6 +372,68 @@ const dockerCli: DockerRunner = async (args, timeoutMs = 60_000, stdin) => {
     });
   });
 };
+
+/** Resolves when the per-Run egress proxy has bound its listener. */
+export interface ProxyReadyWaiter {
+  (containerId: string): Promise<void>;
+}
+
+/**
+ * A liveness ceiling on the `docker logs` CHILD PROCESS — the same mechanism `dockerCli`
+ * already uses for every other Docker call. Nothing waits for it on the success path; it
+ * exists so a proxy that never prints and never exits cannot hang Run start forever.
+ */
+const PROXY_READY_CEILING_MS = 30_000;
+
+/**
+ * Wait for the proxy by FOLLOWING ITS LOG, not by sleeping and hoping.
+ *
+ * `docker run --detach` returns once the container's process has been started, which is
+ * before Node has bound a socket. Polling would be a retry loop and a fixed sleep would be
+ * an arbitrary delay; both are guesses. The proxy prints one line when `listen` fires, so
+ * this waits on the actual event and resolves the instant it arrives.
+ */
+const dockerLogsReadyWaiter: ProxyReadyWaiter = (containerId) =>
+  new Promise<void>((settle, reject) => {
+    const child = spawn('docker', ['logs', '--follow', containerId], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: PROXY_READY_CEILING_MS,
+      killSignal: 'SIGKILL',
+    });
+    let seen = '';
+    let settled = false;
+
+    const finish = (err?: Error): void => {
+      if (settled) return;
+      settled = true;
+      child.kill('SIGKILL');
+      if (err) reject(err);
+      else settle();
+    };
+
+    const consume = (chunk: Buffer | string): void => {
+      seen += String(chunk);
+      if (seen.includes(PROXY_READY_LINE)) finish();
+    };
+    child.stdout?.on('data', consume);
+    child.stderr?.on('data', consume);
+    child.on('error', (err) => finish(err));
+    // Reached when the proxy container died, or when the ceiling above killed the follow.
+    child.on('close', () =>
+      finish(
+        new Error(
+          `no \`${PROXY_READY_LINE}\` from the proxy container${seen.trim() === '' ? '' : `: ${seen.trim()}`}`,
+        ),
+      ),
+    );
+  });
+
+/** The per-Run containers and network that implement one `egress_allowlist` sandbox. */
+interface EgressResources {
+  networkName: string;
+  proxyContainerId: string;
+  proxyPort: number;
+}
 
 class DockerSandbox implements Sandbox {
   constructor(
@@ -312,10 +496,21 @@ export function shellQuote(value: string): string {
 export class DockerSandboxProvider implements SandboxProvider {
   readonly name = 'DockerSandboxProvider';
 
+  /**
+   * Sandbox container id -> the egress network and proxy provisioned for it.
+   *
+   * In-process bookkeeping so `release` can tear down all three resources. It is not the
+   * guarantee — `sweepOrphans` is, because a crashed daemon loses this map and both the
+   * proxy container and the network carry the same `armada.run_id` label the sweep
+   * filters on.
+   */
+  private readonly egressByContainer = new Map<string, EgressResources>();
+
   constructor(
     private readonly profiles: Record<string, SandboxProfile>,
     private readonly workspaceRoot: string,
     private readonly docker: DockerRunner = dockerCli,
+    private readonly awaitProxyReady: ProxyReadyWaiter = dockerLogsReadyWaiter,
   ) {}
 
   async acquire(spec: SandboxSpec): Promise<Sandbox> {
@@ -334,17 +529,116 @@ export class DockerSandboxProvider implements SandboxProvider {
       workspacePath = verified.resolved;
     }
 
-    const started = await this.docker(buildCreateArgs(spec, profile, workspacePath));
+    // R47 — the egress subsystem comes up BEFORE the sandbox, so the sandbox is never
+    // attached to a network whose only exit is not yet listening.
+    let egress: EgressResources | null = null;
+    if (profile.network === 'egress_allowlist') {
+      if (!profile.egress) {
+        // Unreachable through validateProfiles, which refuses the mode without a resolved
+        // allowlist. Restated here so a directly-constructed profile cannot get a network
+        // with no filter on it.
+        throw new Error(
+          `profile \`${spec.profile}\` declares \`network: egress_allowlist\` with no resolved allowlist`,
+        );
+      }
+      egress = await this.provisionEgress(spec.runId, profile.egress);
+    }
+
+    let started: DockerResult;
+    try {
+      started = await this.docker(
+        buildCreateArgs(
+          spec,
+          profile,
+          workspacePath,
+          egress ? { networkName: egress.networkName, proxyPort: egress.proxyPort } : undefined,
+        ),
+      );
+    } catch (err) {
+      await this.tearDownEgress(egress);
+      throw err;
+    }
     if (started.code !== 0) {
+      // Otherwise a failed sandbox leaves a proxy and a network behind for the next sweep.
+      await this.tearDownEgress(egress);
       throw new Error(`docker run failed: ${started.stderr.trim()}`);
     }
 
-    return new DockerSandbox(started.stdout.trim(), this.docker, profile.timeout_seconds);
+    const containerId = started.stdout.trim();
+    if (egress) this.egressByContainer.set(containerId, egress);
+    return new DockerSandbox(containerId, this.docker, profile.timeout_seconds);
   }
 
   /** R48 — released on ANY terminal outcome, including cancellation and crash recovery. */
   async release(sandbox: Sandbox): Promise<void> {
     await this.docker(['rm', '-f', sandbox.id]);
+    // The sandbox goes first: a network with a container still attached cannot be removed.
+    const egress = this.egressByContainer.get(sandbox.id);
+    if (egress) {
+      this.egressByContainer.delete(sandbox.id);
+      await this.tearDownEgress(egress);
+    }
+  }
+
+  /**
+   * Stand up the per-Run egress path — the whole of R47's mechanism, in three calls.
+   *
+   * Ordering is not incidental. The network is `--internal` from creation, so there is no
+   * window in which it routes. The proxy starts on the DEFAULT bridge, where it has egress
+   * and working DNS, and is joined to the internal network afterwards — it is the only
+   * container with a foot on both sides, and the sandbox is created only once its listener
+   * has actually reported ready.
+   *
+   * Every failure unwinds what it already created. A half-provisioned egress path is the
+   * one outcome that could leave a sandbox on a network with no filter on it.
+   */
+  private async provisionEgress(runId: string, egress: ResolvedEgress): Promise<EgressResources> {
+    const networkName = egressNetworkName(runId);
+
+    const network = await this.docker(buildNetworkCreateArgs(runId, RUN_ID_LABEL));
+    if (network.code !== 0) {
+      throw new Error(`could not create the egress network for run ${runId}: ${network.stderr.trim()}`);
+    }
+
+    const proxy = await this.docker(buildProxyCreateArgs(runId, egress, RUN_ID_LABEL));
+    if (proxy.code !== 0) {
+      await this.docker(['network', 'rm', networkName]);
+      throw new Error(
+        `could not start the egress proxy from \`${egress.proxyImage}\`: ${proxy.stderr.trim()}. ` +
+          'The image must carry the daemon\'s `dist/` — it runs `node /app/dist/sandbox/egress-proxy.js`.',
+      );
+    }
+
+    const resources: EgressResources = {
+      networkName,
+      proxyContainerId: proxy.stdout.trim(),
+      proxyPort: egress.proxyPort,
+    };
+
+    const connected = await this.docker(buildNetworkConnectArgs(runId, resources.proxyContainerId));
+    if (connected.code !== 0) {
+      await this.tearDownEgress(resources);
+      throw new Error(
+        `could not attach the egress proxy to ${networkName}: ${connected.stderr.trim()}`,
+      );
+    }
+
+    try {
+      await this.awaitProxyReady(resources.proxyContainerId);
+    } catch (err) {
+      await this.tearDownEgress(resources);
+      throw new Error(
+        `the egress proxy for run ${runId} never became ready: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    return resources;
+  }
+
+  private async tearDownEgress(egress: EgressResources | null): Promise<void> {
+    if (!egress) return;
+    await this.docker(['rm', '-f', egress.proxyContainerId]);
+    await this.docker(['network', 'rm', egress.networkName]);
   }
 
   /**
@@ -356,6 +650,11 @@ export class DockerSandboxProvider implements SandboxProvider {
    *
    * `activeRunIds` is passed in rather than queried here so this stays testable and so the
    * sandbox layer does not reach into the runs table.
+   *
+   * P14 adds two resource kinds to the same sweep, on the same label: the egress proxy is
+   * a labelled container, so it needs no new code here, and the per-Run network is
+   * reclaimed after the containers on it, because Docker refuses to remove a network that
+   * still has one attached.
    */
   async sweepOrphans(activeRunIds: Set<string> = new Set()): Promise<string[]> {
     const listed = await this.docker([
@@ -375,7 +674,29 @@ export class DockerSandboxProvider implements SandboxProvider {
 
     // One removal for N containers rather than one spawn each.
     if (orphans.length > 0) await this.docker(['rm', '-f', ...orphans]);
+    await this.sweepEgressNetworks(activeRunIds);
     return orphans;
+  }
+
+  /**
+   * Networks are FILTERED BY THE ARMADA LABEL, exactly as containers are — the name only
+   * supplies the run id. A network is never removed because it looked like ours.
+   */
+  private async sweepEgressNetworks(activeRunIds: Set<string>): Promise<void> {
+    const listed = await this.docker([
+      'network', 'ls', '--filter', `label=${RUN_ID_LABEL}`, '--format', '{{.Name}}',
+    ]);
+    if (listed.code !== 0) return;
+
+    const stale: string[] = [];
+    for (const name of listed.stdout.split('\n').map((l) => l.trim()).filter(Boolean)) {
+      const runId = name.startsWith(EGRESS_NETWORK_PREFIX)
+        ? name.slice(EGRESS_NETWORK_PREFIX.length)
+        : '';
+      if (runId === '' || activeRunIds.has(runId)) continue;
+      stale.push(name);
+    }
+    if (stale.length > 0) await this.docker(['network', 'rm', ...stale]);
   }
 }
 
