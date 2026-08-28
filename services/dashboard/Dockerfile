@@ -1,22 +1,43 @@
-# armada-dashboard — Phase 0 skeleton.
+# armada-dashboard — the operator console.
 #
-# Serves a static placeholder and a healthcheck endpoint. Nothing else.
+# Two stages: build the React/TypeScript sources with Vite, then serve the static output
+# from nginx. This replaces the Phase 0 placeholder, which existed precisely so that the
+# bundler and router could be chosen by the phase that needed them rather than guessed at
+# in Phase 0.
 #
-# WHY THERE IS NO BUILD STEP YET. The dashboard's 27 surfaces land in Phase 8 against
-# specs/dashboard/design-dashboard.md, which is explicit that "component API design, state
-# management, file structure, build tooling, or test strategy" are out of its scope and
-# belong to the implementation phase. Phase 0 asks only for a skeleton that boots and
-# serves a healthcheck, and shipping an nginx image with a static file does exactly that
-# WITHOUT pre-committing Phase 8 to a bundler, a router, or a state library.
+# nginx is not only a static file server here. It is also the SAME-ORIGIN PROXY that makes
+# the dashboard work at all: neither armada-daemon nor armada-forge emits a CORS header or
+# answers an OPTIONS preflight, so the browser has to see all three as one origin. See
+# nginx.conf.
 #
-# Phase 8 replaces this file with a two-stage build: compile the React/TypeScript sources
-# under services/dashboard/src/, then copy the built assets into this same nginx stage.
+# No network is needed at RUN time and none is reached at build time beyond the npm
+# registry, so this does not touch the zero-external-spend property of a default install —
+# nothing here contacts a model provider.
+
+FROM node:22-alpine AS build
+
+WORKDIR /app
+
+# Dependencies first, so a source-only change does not re-resolve the tree.
+COPY package.json package-lock.json ./
+# `npm ci` rather than `npm install`: it installs exactly the lockfile and fails if
+# package.json and the lock have drifted, which is the behaviour an image build wants.
+RUN npm ci
+
+COPY tsconfig.json tsconfig.test.json vite.config.ts ./
+COPY src ./src
+
+# `npm run build` type-checks before bundling (`tsc --noEmit && vite build`), so a type
+# error fails the image rather than shipping a bundle Vite happily produced by stripping
+# the types it did not check.
+RUN npm run build
+
 
 FROM nginx:1.27-alpine
 
-# Health endpoint for the Compose healthcheck, plus SPA history fallback so Phase 8's
-# client-side routes survive a page reload without further image changes.
+# The proxy configuration and the SPA history fallback.
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY public /usr/share/nginx/html
+
+COPY --from=build /app/dist /usr/share/nginx/html
 
 EXPOSE 80

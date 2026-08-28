@@ -1,0 +1,186 @@
+/*
+ * Armada motion and depth policy — design-dashboard.md Requirements 12-17.
+ *
+ * THE GOVERNING RULE (Requirement 12): motion and depth belong to state transitions and
+ * navigation chrome, NEVER to streaming data. Anything that can appear ~20+ times on one
+ * screen, or be appended to at high frequency, gets zero entrance animation, zero
+ * box-shadow, and zero blur.
+ *
+ * THE SECOND RULE (Requirement 13): if it moves, it is live. Motion is a truth-carrier.
+ * When an entity reaches a terminal state all motion on its surface stops within 200ms.
+ * That inverse is the disconnect signal of Requirement 112 — which is why the classes
+ * below are applied from status and removed from status, never toggled for effect.
+ *
+ * Every animation in the application is defined in THIS FILE. If a component needs one
+ * that is not here, the policy is being violated.
+ */
+
+/* ── Navigation: the only sliding element (Requirement 14) ───────────────────────── */
+
+.nav-indicator {
+  transition: transform 180ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* ── Static depth: the entire depth language for non-overlay surfaces (Requirement 14).
+   A 1px hairline plus one inner top highlight. The highlight stays achromatic on the warm
+   ground deliberately (Requirement 3d). ─────────────────────────────────────────────── */
+
+.panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* ── Overlays: the ONLY blur in the application (Requirement 14). Modals and popovers
+   block; drawers do not, so no scrim class exists for a drawer (Requirement 38a). ──── */
+
+.overlay-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(14, 10, 7, 0.7);
+  backdrop-filter: blur(12px);
+}
+
+/* Requirement 38b: the drawer's left-edge shadow is the only shadow outside an overlay. */
+.drawer-surface {
+  background: var(--surface-2);
+  border-left: 1px solid var(--line-strong);
+  box-shadow: -16px 0 32px rgba(14, 10, 7, 0.55);
+}
+
+/* ── Live surfaces: bloom + shimmer, rendered ONLY while status is running
+   (Requirement 14). Both are removed by removing .is-live. ───────────────────────── */
+
+.is-live {
+  position: relative;
+  overflow: hidden;
+}
+
+.is-live::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* Requirement 32d use 3: 6-10% radial bloom. Not a sole carrier of meaning — it sits
+     beneath the status chip it echoes (Requirement 32e). */
+  background: radial-gradient(
+    120% 140% at 50% 0%,
+    color-mix(in srgb, var(--bloom-hue, var(--status-live)) 8%, transparent) 0%,
+    transparent 70%
+  );
+}
+
+.is-live::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 2px;
+  width: 40%;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--bloom-hue, var(--status-live)),
+    transparent
+  );
+  animation: armada-shimmer 2s linear infinite;
+}
+
+@keyframes armada-shimmer {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(350%); }
+}
+
+/* ── The rotating half-disc. Requirement 22: the ONLY rotating element in the
+   application. 1.2s linear (Requirement 21). ────────────────────────────────────── */
+
+.mark-rotating {
+  transform-origin: 50% 50%;
+  animation: armada-rotate 1.2s linear infinite;
+}
+
+@keyframes armada-rotate {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Counters: 150ms crossfade on value change. No odometer roll (Requirement 14). ── */
+
+.counter {
+  font-variant-numeric: tabular-nums; /* Requirement 11 */
+  transition: opacity 150ms linear;
+}
+
+.counter-stale {
+  /* Requirement 112: on disconnect, counters freeze and dim. This is the primary
+     disconnect signal alongside the absence of motion. */
+  color: var(--fg-dim);
+}
+
+/* ── Focus ring: instant, never animated (Requirement 14). ──────────────────────── */
+
+:where(a, button, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid rgba(76, 141, 255, 0.4);
+  outline-offset: 0;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* ── The permitted row transition. Requirement 15: table rows, tree rows, editor lines,
+   and chips get background-color 80ms and NOTHING else — no shadow, no height
+   transition, no entrance animation. ─────────────────────────────────────────────── */
+
+.row {
+  transition: background-color 80ms linear;
+}
+
+/* Requirement 80: the problems panel replaces its whole set atomically with a single
+   120ms container crossfade. Individual entries never animate. */
+.problems-swap {
+  animation: armada-fade 120ms linear;
+}
+
+@keyframes armada-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ── Copy acknowledgement (Requirement 144): the check mark renders for 900ms.
+   The DURATION LIVES HERE AND ONLY HERE. CopyToken clears its state from `animationend`
+   rather than from a matching setTimeout, so there is no second number to keep in sync and
+   nothing to drift when a backgrounded tab throttles timers but suspends animations. ── */
+
+.copy-ack {
+  animation: armada-copy-ack 900ms steps(1, end);
+}
+
+@keyframes armada-copy-ack {
+  from { opacity: 1; }
+  to   { opacity: 1; }
+}
+
+/* ── Reduced motion (Requirement 17). The bloom and shimmer become static fills, the
+   counter crossfade snaps, and the rotating mark renders static. NO INFORMATION IS
+   LOST: liveness and connection state remain readable from text and chrome, which is
+   what Requirements 112-113 and edge case 38 require. ───────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-indicator,
+  .counter,
+  .row,
+  .problems-swap {
+    transition: none;
+    animation: none;
+  }
+
+  .mark-rotating {
+    animation: none;
+  }
+
+  .is-live::after {
+    animation: none;
+    width: 100%;
+    /* static fill rather than a sweep — still present, no longer moving */
+    background: var(--bloom-hue, var(--status-live));
+  }
+}

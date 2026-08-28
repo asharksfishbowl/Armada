@@ -7,17 +7,27 @@
  */
 
 import type { RouteResponse } from './agents.js';
-import type { RunStore, RunRow } from '../../runs/store.js';
+import type { RunStore, RunWithAgent } from '../../runs/store.js';
 import { RunOrchestrator, RunStartError } from '../../runs/orchestrator.js';
 
 /** R3b — a bound the caller cannot raise, so one request cannot ask for the whole table. */
 const MAX_LIMIT = 200;
 const DEFAULT_LIMIT = 50;
 
-function summarise(run: RunRow): Record<string, unknown> {
+function summarise(run: RunWithAgent): Record<string, unknown> {
   return {
     run_id: run.run_id,
     agent_version_id: run.agent_version_id,
+    // P9, design-dashboard.md dependency ruling 6. `agent_version_id` alone is a dead end
+    // over HTTP — nothing resolves it to an Agent or to a version number, which left
+    // Requirement 106's `v1 ↑2` pin badge unbuildable. Both come from the join in
+    // RunStore, so neither is a copy of state that lives elsewhere.
+    //
+    // `agent_id` is what separates Requirement 106's `behind` badge from Requirement
+    // 106a's `v?`: an id absent from `GET /api/agents` is a soft-deleted Agent (R26),
+    // and that badge must never render `↑0`.
+    agent_id: run.agent_id,
+    version: run.version,
     status: run.status,
     outcome: run.outcome,
     started_at: run.started_at,
@@ -81,6 +91,13 @@ export function createRunRoutes(orchestrator: RunOrchestrator, store: RunStore) 
           result: run.result,
           mode: run.mode,
           workspace_path: run.workspace_path,
+          // P9, design-dashboard.md dependency ruling 7 — team-run identification on the
+          // DETAIL response. `parent_run_id` and `is_team_run` already shipped on the
+          // summary; `team_version_id` is the third field that ruling names and the only
+          // one that was still unreachable, so a Run could not be traced back to the Team
+          // definition that produced it. Detail only: it answers "what is this run",
+          // which is a question the list does not ask.
+          team_version_id: run.team_version_id,
           counters: {
             steps_used: run.steps_used,
             model_tokens_used: run.model_tokens_used,

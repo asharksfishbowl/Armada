@@ -42,6 +42,40 @@ export interface RunRow {
   ended_at: string | null;
 }
 
+/**
+ * A Run row joined to the Agent version it pinned.
+ *
+ * P9 / design-dashboard.md dependency rulings 6 and 7. `runs` stores `agent_version_id`, a
+ * uuid, and nothing else about the Agent — which left the dashboard's version pin badge
+ * (Requirement 106) unimplementable: `v1 ↑2` needs the executed version INTEGER and the
+ * identity of the Agent whose current version it is being compared against, and no HTTP
+ * route resolved an `agent_version_id` to either.
+ *
+ * These two columns are read from `agent_versions`, never stored on `runs`. Copying them
+ * would create a second place that knows a Run's pinned version, and invariant 2 says the
+ * pin is a resolved snapshot — one source, joined at read time.
+ *
+ * `agent_id` rather than the agent's name deliberately: Requirement 106a needs to
+ * distinguish "this Agent is at a later version" from "this Agent was soft-deleted", and
+ * `GET /api/agents` excludes deleted Agents (R26). An `agent_id` absent from that list is
+ * therefore exactly the deleted case, and the badge renders `v?` — never `↑0`, which would
+ * assert the run is current.
+ *
+ * The JOIN is inner, not LEFT: `runs.agent_version_id` is NOT NULL behind a foreign key,
+ * and R26's soft delete retains every `agent_versions` row. A missing match would be a
+ * referential fault, and hiding it behind a LEFT JOIN would render it as a null version.
+ */
+export interface RunWithAgent extends RunRow {
+  agent_id: string;
+  version: number;
+}
+
+const RUN_WITH_AGENT_SELECT = `
+  SELECT r.*, av.agent_id, av.version
+    FROM runs r
+    JOIN agent_versions av ON av.agent_version_id = r.agent_version_id
+`;
+
 export interface ListFilter {
   agentId?: string;
   status?: string;
@@ -109,8 +143,11 @@ export class RunStore {
     return rows;
   }
 
-  async get(runId: string): Promise<RunRow | null> {
-    const { rows } = await this.pool.query<RunRow>('SELECT * FROM runs WHERE run_id = $1', [runId]);
+  async get(runId: string): Promise<RunWithAgent | null> {
+    const { rows } = await this.pool.query<RunWithAgent>(
+      `${RUN_WITH_AGENT_SELECT} WHERE r.run_id = $1`,
+      [runId],
+    );
     return rows[0] ?? null;
   }
 
@@ -121,40 +158,41 @@ export class RunStore {
    * silently skip or repeat rows as the list shifts under them. The `(started_at DESC,
    * run_id DESC)` index in migration 005 exists for exactly this comparison.
    */
-  async list(filter: ListFilter): Promise<RunRow[]> {
+  async list(filter: ListFilter): Promise<RunWithAgent[]> {
     const where: string[] = [];
     const params: unknown[] = [];
 
     if (filter.agentId) {
       params.push(filter.agentId);
-      // Joined rather than stored on `runs`: a Run pins an agent VERSION (R53b), and
-      // filtering by agent must span every version of it.
+      // Now expressible directly against the join rather than as a subquery, but left as
+      // a subquery on purpose: it is the filter's own statement of intent — a Run pins an
+      // agent VERSION (R53b) and filtering by agent must span every version of it.
       where.push(
-        `agent_version_id IN (SELECT agent_version_id FROM agent_versions WHERE agent_id = $${params.length})`,
+        `r.agent_version_id IN (SELECT agent_version_id FROM agent_versions WHERE agent_id = $${params.length})`,
       );
     }
     if (filter.status) {
       params.push(filter.status);
-      where.push(`status = $${params.length}::run_status`);
+      where.push(`r.status = $${params.length}::run_status`);
     }
     if (filter.outcome) {
       params.push(filter.outcome);
-      where.push(`outcome = $${params.length}::run_outcome`);
+      where.push(`r.outcome = $${params.length}::run_outcome`);
     }
     if (filter.parentRunId) {
       params.push(filter.parentRunId);
-      where.push(`parent_run_id = $${params.length}`);
+      where.push(`r.parent_run_id = $${params.length}`);
     }
     if (filter.cursor) {
       params.push(filter.cursor.startedAt, filter.cursor.runId);
-      where.push(`(started_at, run_id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`);
+      where.push(`(r.started_at, r.run_id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`);
     }
 
     params.push(filter.limit);
-    const { rows } = await this.pool.query<RunRow>(
-      `SELECT * FROM runs
+    const { rows } = await this.pool.query<RunWithAgent>(
+      `${RUN_WITH_AGENT_SELECT}
        ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
-       ORDER BY started_at DESC, run_id DESC
+       ORDER BY r.started_at DESC, r.run_id DESC
        LIMIT $${params.length}`,
       params,
     );

@@ -1,0 +1,107 @@
+/*
+ * Armada design tokens — the single source of truth for every colour, size, spacing
+ * step, and radius in the dashboard.
+ *
+ * THIS FILE IS PARSED BY A TEST. src/__tests__/tokens.test.ts reads this file as text,
+ * extracts the custom properties below, and asserts design-dashboard.md Requirement 139
+ * (every status hue >= 4.5:1 against --surface-2 AND --surface-3). Changing a value to one
+ * that does not clear the floor fails `npm test`, which is what makes Requirement 139 a
+ * build-time assertion rather than a comment. Do not duplicate these hexes into a .ts
+ * module — a second copy is a second source of truth and the test would stop guarding the
+ * value the browser actually renders.
+ *
+ * Palette: "Armada Oak" (Requirements 2, 3, 3a-3d), adopted 2026-08-27.
+ * Rationale record: specs/dashboard/design-dashboard-oak-amendment.md.
+ *
+ * One theme, dark, no light theme, no prefers-color-scheme branch (Requirement 1).
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* --- Surfaces (Requirement 2). Elevation is surface colour ONLY; box-shadow is
+     reserved for overlays and the drawer left edge (Requirements 14, 38b). --- */
+  --surface-0: #0E0A07; /* tarred hull — application background */
+  --surface-1: #17110B; /* dark oak — page and panel background */
+  --surface-2: #1F1610; /* oak plank — card, row group, table body */
+  --surface-3: #2B2016; /* lit plank — row hover, editor gutter */
+  --surface-4: #38291C; /* selected plank — selected row, menu, popover body */
+
+  --line: #33261B;        /* grain hairline */
+  --line-strong: #5A4128; /* brass-warm seam — section divider. Chrome, never status
+                             (Requirements 3b, 32b). */
+
+  /* --- Foreground ramp (Requirement 3). Exactly three. --- */
+  --fg: #F2E8D8;
+  --fg-muted: #B8A68C;
+  --fg-dim: #85735E; /* 3.91:1 / 3.49:1 — BELOW the 4.5:1 floor. Requirement 140
+                        restricts it to non-essential text: seq numbers, relative
+                        timestamps, placeholder hints. It NEVER carries status. */
+
+  /* --- Accent (Requirement 4). Exactly one, and blue specifically so it can never be
+     confused with a status hue. --accent and --status-live are deliberately different
+     blues; neither may be set from the other. Brass is ruled out permanently (R3b). --- */
+  --accent: #4C8DFF;
+  --accent-hover: #6FA4FF;
+  --accent-wash: rgba(76, 141, 255, 0.12);
+
+  /* --- Status hues (Requirements 21, 26, 29). Exactly six. --- */
+  --status-live: #38BDF8;    /* cyan   — machine activity */
+  --status-good: #34D399;    /* green  — judged good */
+  --status-neutral: #8B96AC; /* pewter — judged not-good, or stopped. Non-alarming. */
+  --status-warn: #F2B33D;    /* amber  — the harness intervened */
+  --status-fault: #F26D6D;   /* red    — fault */
+  --status-pending: #A78BFA; /* violet — awaiting judgement */
+
+  /* Status hue at 12% for chip backgrounds (Requirement 32d, use 1) and 8% for the
+     `error` notice tint (use 2). Enumerated here so no component invents a seventh use. */
+  --tint-live: rgba(56, 189, 248, 0.12);
+  --tint-good: rgba(52, 211, 153, 0.12);
+  --tint-neutral: rgba(139, 150, 172, 0.12);
+  --tint-warn: rgba(242, 179, 61, 0.12);
+  --tint-fault: rgba(242, 109, 109, 0.12);
+  --tint-pending: rgba(167, 139, 250, 0.12);
+
+  /* --- Type (Requirements 6, 7). Two families, six sizes, three weights. --- */
+  --font-ui: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --text-micro: 11px;      --leading-micro: 16px;
+  --text-mono-body: 12px;  --leading-mono-body: 18px;
+  --text-body-sm: 13px;    --leading-body-sm: 20px;
+  --text-body: 15px;       --leading-body: 22px;
+  --text-section: 18px;    --leading-section: 26px;
+  --text-page: 24px;       --leading-page: 32px;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  /* --- Spacing (Requirement 8). Unit is 4px. Exactly seven steps. 6, 10, and 14 are
+     not permitted and are deliberately absent so there is nothing to reach for. --- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+
+  /* --- Radius (Requirement 9). Exactly four. --- */
+  --radius-chip: 4px;   /* chips, badges */
+  --radius-control: 6px; /* cards, inputs, buttons */
+  --radius-overlay: 10px; /* modals, drawers, popovers */
+  --radius-disc: 999px;  /* status mark disc ONLY */
+
+  /* --- Row heights (Requirement 10). --- */
+  --row-table: 32px;
+  --row-event: 28px;
+  --row-tree: 24px;
+
+  /* --- Shell geometry (Requirements 33, 38, 76). --- */
+  --rail-width: 200px;
+  --drawer-width: 480px;
+  --problems-width: 320px;
+  --min-viewport: 1280px; /* Requirement 39 / edge 39: below this the content area
+                             scrolls horizontally. It never reflows to mobile. */
+}

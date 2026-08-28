@@ -255,6 +255,16 @@ services:
     depends_on:
       armada-daemon:
         condition: service_healthy
+      # P9 — armada-forge is now a HARD start dependency, not a logical one.
+      #
+      # nginx resolves the hostname in a `proxy_pass` directive AT CONFIG LOAD, not per
+      # request. services/dashboard/nginx.conf proxies /forge/ to armada-forge:8000, so if
+      # that name does not resolve when the container starts, nginx exits with "host not
+      # found in upstream" and the dashboard never comes up at all — a total failure, not a
+      # degraded corpora page. The dependency has to be declared or the boot order decides
+      # whether the console starts.
+      armada-forge:
+        condition: service_healthy
     ports:
       - "${ARMADA_DASHBOARD_PORT:-3000}:80"
     healthcheck:

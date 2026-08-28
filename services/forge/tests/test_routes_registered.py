@@ -108,6 +108,32 @@ def test_earlier_phase_routes_are_still_mounted() -> None:
         assert (method, path) in registered, f"{method} {path} was lost"
 
 
+def test_p9_base_model_shortlist_route_is_mounted() -> None:
+    """P9 — `GET /models/base` backs design-dashboard.md Requirement 129.
+
+    Two of that table's five columns, `quantization` and `smoke_test`, have no other HTTP
+    representation anywhere in the platform: they are shortlist-FILE properties and
+    `GET /models/bindings` reads the `model_bindings` table. If this route stops being
+    mounted, the dashboard does not fail loudly — it renders a BaseModel table with two
+    empty columns, which is the quiet-degradation failure this file exists to catch.
+    """
+    assert ("GET", "/models/base") in _registered()
+
+
+def test_base_model_route_is_read_only() -> None:
+    """`config/base-models.yaml` records that the shortlist is file-configured only (R4).
+
+    A GET does not weaken that; a POST, PUT, PATCH, or DELETE on the same path would. This
+    asserts the constraint rather than trusting that nobody adds the obvious next route.
+    """
+    registered = _registered()
+    for method in ("POST", "PUT", "PATCH", "DELETE"):
+        assert (method, "/models/base") not in registered, (
+            f"{method} /models/base is mounted. The BaseModel shortlist is file-configured "
+            "only (Training R4) — it has no write surface by design."
+        )
+
+
 def test_supplied_listing_is_matched_before_the_dataset_id_route() -> None:
     """`/datasets/supplied` must be declared BEFORE `/datasets/{dataset_id}`.
 
