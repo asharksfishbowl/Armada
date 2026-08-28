@@ -60,15 +60,27 @@ def _context(root: Path) -> str:
     )
 
 
-def validate_directory_location(location: str) -> str | None:
-    """Return an error message, or None when the location is usable.
+def resolve_directory_location(location: str) -> tuple[Path | None, str | None]:
+    """Validate a location and RETURN THE PATH THAT WAS VALIDATED.
+
+    `(resolved, None)` when usable, `(None, message)` when not.
+
+    RETURNING THE RESOLVED PATH IS THE POINT. This used to return only a message, so a
+    caller that needed the path resolved `location` a SECOND time on its own — and
+    `_fetch_directory` did exactly that. Two independent resolutions of the same string
+    mean the value that gets WALKED is not the value that was CHECKED: a symlink swapped
+    between the two calls is contained on the first resolve and escapes on the second.
+    Narrow on a single-operator host, but it is the whole reason CodeQL flagged four
+    py/path-injection sinks here — the sanitizer's output never reached the sink.
+
+    One resolve, one validated value, handed to the caller to use directly.
 
     Returns rather than raises so the caller owns the HTTP shape and NO `sources` row is
     written on rejection — a rejected registration that leaves a row behind would
     reproduce the original defect one layer down.
     """
     if not location:
-        return "`location` is required for a `directory` Source."
+        return None, "`location` is required for a `directory` Source."
 
     # Resolved up front so every message names paths consistently. An unresolved root and
     # a resolved candidate in the same sentence would print the root two different ways
@@ -77,7 +89,7 @@ def validate_directory_location(location: str) -> str | None:
 
     candidate = Path(location)
     if not candidate.is_absolute():
-        return (
+        return None, (
             f"`{location}` must be an absolute path. {_context(root)} "
             f"Register the path as it appears on the host, for example `{root}/my-docs`."
         )
@@ -90,7 +102,7 @@ def validate_directory_location(location: str) -> str | None:
 
     if not path_is_within(resolved, root):
         escaped = str(resolved) != str(candidate)
-        return (
+        return None, (
             f"`{location}` "
             + (f"resolves to `{resolved}`, which is " if escaped else "is ")
             + f"outside ARMADA_INGEST_ROOT (`{root}`). {_context(root)} "
@@ -103,7 +115,7 @@ def validate_directory_location(location: str) -> str | None:
     if not resolved.exists():
         # Under the root but absent, so telling them to move it under the root — which the
         # generic advice used to do — would be a no-op. These are the two real causes.
-        return (
+        return None, (
             f"`{location}` is under ARMADA_INGEST_ROOT but does not exist inside "
             f"armada-forge. Either the content has not been copied there yet, or "
             f"ARMADA_INGEST_ROOT was changed without restarting armada-forge, so the "
@@ -111,7 +123,7 @@ def validate_directory_location(location: str) -> str | None:
         )
 
     if not resolved.is_dir():
-        return (
+        return None, (
             f"`{location}` is a file, not a directory. A `directory` Source names a "
             f"directory to walk — register its parent and narrow with `include_globs`."
         )
@@ -119,10 +131,20 @@ def validate_directory_location(location: str) -> str | None:
     # The mount is READ-ONLY (:ro), so readability is the property to check. Requiring
     # writability would reject every correctly-configured Source.
     if not os.access(resolved, os.R_OK | os.X_OK):
-        return (
+        return None, (
             f"`{location}` exists but armada-forge cannot read it. Grant read and execute "
             f"to the user forge runs as. Write access is neither needed nor possible — "
             f"ARMADA_INGEST_ROOT is mounted read-only."
         )
 
-    return None
+    return resolved, None
+
+
+def validate_directory_location(location: str) -> str | None:
+    """Message-only view, for registration.
+
+    Registration writes no `sources` row on rejection and never opens the path, so it wants
+    the message and nothing else. Kept as a named wrapper rather than having that call site
+    index `[1]` into a tuple, which reads as a mistake at every call site that does it.
+    """
+    return resolve_directory_location(location)[1]

@@ -64,7 +64,16 @@ def estimate_tokens_of(char_count: int) -> int:
 # the unit we want to keep whole.
 _TOP_LEVEL_DEF = re.compile(
     r"^(?:"
-    r"(?:@\w[\w.]*.*\n)*"                      # decorators/annotations above the def
+    # `@\w.*\n`, NOT `@\w[\w.]*.*\n`. `[\w.]*` is a SUBSET of `.*`, so the two
+    # quantifiers accepted exactly the same strings while handing the engine a choice of
+    # how to divide each decorator line between them — two ways per line, 2^n over n
+    # lines, and exponential backtracking on `@a` followed by `.\n@a` repeated
+    # (CodeQL py/redos, alert 1). Chunker input is ingested corpus content, so that is
+    # reachable from a file in any repo someone ingests.
+    #
+    # The redundant quantifier is REMOVED, not bounded. Bounding would cap the blowup;
+    # removing it deletes the ambiguity that causes it. Same language, one way to match.
+    r"(?:@\w.*\n)*"                            # decorators/annotations above the def
     r"(?:export\s+)?(?:default\s+)?"
     r"(?:public\s+|private\s+|protected\s+|internal\s+)?"
     r"(?:static\s+|final\s+|abstract\s+|async\s+|pub\s+)*"

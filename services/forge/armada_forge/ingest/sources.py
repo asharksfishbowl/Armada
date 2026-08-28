@@ -27,7 +27,7 @@ from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
-from armada_forge.ingest.directory_source import path_is_within, validate_directory_location
+from armada_forge.ingest.directory_source import path_is_within, resolve_directory_location
 
 UPLOAD_ROOT = Path("/data/uploads")
 WEB_CRAWL_DEPTH = 2
@@ -164,14 +164,20 @@ def _fetch_directory(location: str) -> FetchedSource:
     `directory` Source is. This function previously carried its own exists/is_dir pair and
     no containment check at all, which is exactly the drift that gets missed.
     """
-    problem = validate_directory_location(location)
-    if problem:
+    resolved, problem = resolve_directory_location(location)
+    if problem is not None:
         # SourceFetchError, so edge 1 applies: this Source records `failed` with the
         # message and the remaining Sources still ingest.
         raise SourceFetchError(problem)
+    assert resolved is not None  # problem is None ⇒ resolved is set; narrows the type.
 
+    # THE PATH THAT WAS VALIDATED, not a fresh resolve of the same string. This previously
+    # called `Path(location).resolve()` again here, so the directory actually walked was
+    # resolved a second time, independently of the containment check — and a symlink
+    # swapped between the two resolves would pass the check and then escape it.
+    #
     # No cleanup — this is the operator's directory, not ours.
-    return FetchedSource(root=Path(location).resolve(), cleanup=None)
+    return FetchedSource(root=resolved, cleanup=None)
 
 
 def _fetch_upload(location: str) -> FetchedSource:
