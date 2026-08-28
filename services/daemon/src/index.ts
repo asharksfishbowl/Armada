@@ -30,6 +30,7 @@ import { parse as parseYaml } from 'yaml';
 import { Kernel } from './kernel/kernel.js';
 import { PluginConfigError, type FactoryTables } from './kernel/plugin-registry.js';
 import { PostgresEventSink, collectCredentialEnvNames } from './events/event-log.js';
+import { publishOnAppend, type EventPublisher } from './events/publish-to-subscribers.js';
 import { PgVectorRetrievalProvider, DEFAULT_RETRIEVAL_OPTIONS } from './retrieval/pgvector-provider.js';
 import { createEmbedClient } from './retrieval/embed-client.js';
 import {
@@ -239,10 +240,23 @@ const factories: FactoryTables = {
     // appended (data-flow step 14). Invariant 6 guarantees every Run reaches that Event, so
     // no session can outlive its Run — and the wrapper delegates `name`, so
     // GET /api/health still reports what config/plugins.yaml selected.
+    // Wrapped a SECOND time for P10: every appended Event is fanned out to its Run's
+    // WebSocket subscribers. WsRouter.publish() existed since P3 with no call site, so
+    // /ws delivered replay and then silence.
+    //
+    // The sink is the right seam because every Event goes through it (invariant 5).
+    // Publishing from the agent loop would cover the loop's Events and miss run_start,
+    // delegation, and anything a later phase appends.
     PostgresEventSink: (deps) =>
-      closeMcpSessionsOnRunEnd(
-        new PostgresEventSink(deps.pool, deps.credentialEnvNames),
-        mcpSessions,
+      publishOnAppend(
+        closeMcpSessionsOnRunEnd(
+          new PostgresEventSink(deps.pool, deps.credentialEnvNames),
+          mcpSessions,
+        ),
+        // RESOLVED PER APPEND. The gateway is created below, after this factory runs —
+        // calling this here would repeat the "Kernel accessed before registration
+        // completed" boot failure exactly.
+        () => wsPublisher,
       ),
   },
 };
@@ -477,6 +491,13 @@ try {
   );
 }
 
+/**
+ * Filled in once the gateway exists. Null until then, which is correct rather than
+ * merely tolerable: nobody can have subscribed to a Run over a listener that is not open,
+ * so an Event appended in that window has no subscribers to miss it.
+ */
+let wsPublisher: EventPublisher | null = null;
+
 const gateway = createGateway({
   port: PORT,
   version: VERSION,
@@ -509,6 +530,10 @@ function shutdown(): void {
     .then(() => pool.end())
     .then(() => process.exit(0));
 }
+
+// The sink's publisher getter reads this on every append, so live streaming begins with
+// the listener and needs no re-registration.
+wsPublisher = gateway.wsRouter;
 
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
