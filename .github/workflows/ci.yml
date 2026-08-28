@@ -17,7 +17,15 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore: &docs
+      - '**/*.md'
+      - 'docs/**'
+      - 'specs/**'
+      - 'design-references/**'
+      - 'LICENSE'
+      - 'THIRD_PARTY_NOTICES.md'
   pull_request:
+    paths-ignore: *docs
   workflow_dispatch:
 
 concurrency:
@@ -33,6 +41,13 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────
   unit:
     name: Unit tests
+    # PRs only. Every push to main here arrives via an auto-merged PR whose unit run
+    # already covered the identical tree, so re-running it on main tested nothing new and
+    # made every change look like it fired CI twice.
+    #
+    # workflow_dispatch keeps a manual escape hatch for a direct push to main, which is
+    # the one path this skips.
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -78,7 +93,8 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────
   smoke:
     name: Smoke test (full stack)
-    needs: unit
+    # No `needs: unit` — unit does not run on push, and a needs on a skipped job would
+    # skip smoke too, silently removing the only end-to-end check in the pipeline.
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -139,12 +155,26 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.ci-internal.yml up -d
           echo "Stack is up on an internal network — no route off the host."
 
+          # 300s, not 120s. This is a COLD boot: the step above ran `down -v`, so the
+          # database is empty and migrations re-run before forge answers. The smoke
+          # script's own boot takes ~2 minutes, and the previous 120s budget expired
+          # while the stack was still starting — reporting "never became healthy with
+          # egress severed" for a stack that was merely slow, and blaming the egress
+          # change for it.
           ok=0
-          for _ in $(seq 1 60); do
+          for _ in $(seq 1 150); do
             if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then ok=1; break; fi
             sleep 2
           done
-          [ "$ok" = 1 ] || { echo "::error::forge never became healthy with egress severed"; exit 1; }
+          if [ "$ok" != 1 ]; then
+            # Distinguish slow from broken, which the bare error could not.
+            echo "::group::state at timeout"
+            docker compose ps -a || true
+            docker compose logs --tail 60 armada-forge armada-db armada-migrate || true
+            echo "::endgroup::"
+            echo "::error::forge never became healthy with egress severed"
+            exit 1
+          fi
 
           # Registration must not require reaching any model provider.
           n=$(curl -fsS http://localhost:8000/models/bindings | jq '[.[]|select(.status=="promoted")]|length')
