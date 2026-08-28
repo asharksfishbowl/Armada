@@ -36,6 +36,14 @@ on:
 
   workflow_dispatch:
 
+# DELIBERATELY DIFFERENT FROM ci.yml, WHICH SETS THIS TO false.
+#
+# CodeQL analyses the whole tree at HEAD, so a superseded run's findings are a strict
+# subset of what the newer run will report on the same tree — cancelling loses nothing.
+# The smoke job in ci.yml verifies that ONE commit's stack boots end to end, which no
+# later run re-derives, so cancelling there loses the only evidence about that commit.
+#
+# Same knob, opposite setting, because the two jobs prove different kinds of thing.
 concurrency:
   group: codeql-${{ github.ref }}
   cancel-in-progress: true
