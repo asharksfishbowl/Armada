@@ -50,6 +50,8 @@ import { RunOrchestrator } from './runs/orchestrator.js';
 import { createRunRoutes } from './gateway/routes/runs.js';
 import type { LiveBinding } from './models/binding-verifier.js';
 import { CompositeToolProvider } from './tools/composite-provider.js';
+import { McpConfigError, loadMcpServers, type McpConfig } from './mcp/config.js';
+import { McpSessionManager, closeMcpSessionsOnRunEnd } from './mcp/sessions.js';
 import type { ResolvedSnapshot } from './agents/resolver.js';
 import { ModelScheduler } from './models/scheduler.js';
 import { TeamStore } from './teams/store.js';
@@ -97,7 +99,23 @@ const mcpConfig = readYaml('mcp-servers.yaml');
 const modelsConfig = readYaml('models.yaml');
 
 // R59 — NAMES only. Values are read inside the sink, from this process's environment.
+// `mcpConfig` is the RAW parse on purpose: `collectCredentialEnvNames` walks it for
+// `env_keys`, so every variable an MCP server declares is redacted out of every Event even
+// if that server never connects.
 const credentialEnvNames = collectCredentialEnvNames([mcpConfig, modelsConfig, runtimeConfig]);
+
+// R50, edge 18 — validated HERE, at startup, collecting every fault. Two servers sharing a
+// name cannot be disambiguated by R51's namespace, so that is a non-zero exit naming the
+// collision rather than a Run silently reaching whichever one won the map.
+let mcp: McpConfig;
+try {
+  mcp = loadMcpServers(mcpConfig);
+} catch (err) {
+  fail(
+    'config/mcp-servers.yaml is invalid',
+    err instanceof McpConfigError ? err.problems : [err instanceof Error ? err.message : String(err)],
+  );
+}
 
 // build-plan Req 29 — a profile declaring `network: egress_allowlist` is validated HERE,
 // at config load, and REFUSED naming every fault when the subsystem behind it cannot be
@@ -128,6 +146,28 @@ const pool = new Pool({
   connectionTimeoutMillis: 5_000,
 });
 
+/**
+ * ONE session manager for the whole process — Agent Runtime R51-R53. All of P12.
+ *
+ * Sessions are per Run and live inside it; the manager is per process because the SERVER
+ * TABLE is the operator's, not a Run's. It is reachable from two plugins — the
+ * CompositeToolProvider lists and dispatches MCP tools through it, and the EventSink
+ * wrapper below closes a Run's session when `run_end` is appended — so it is constructed
+ * before the factory table that needs it.
+ *
+ * SHIPPED DISABLED. `config/mcp-servers.yaml` declares no server, so `mcp.servers` is empty
+ * on a default installation, nothing connects, and no Run gains an MCP tool. The MVP costs
+ * nothing to run: no credential, no egress.
+ */
+const mcpSessions = new McpSessionManager({
+  servers: mcp.servers,
+  requestTimeoutMs: mcp.requestTimeoutMs,
+  // Deferred for the same reason the retrieval getter below is: this runs before
+  // Kernel.register, so resolving the EventSink now would throw "Kernel accessed before
+  // registration completed" on every boot.
+  events: () => kernelRef().get('EventSink'),
+});
+
 const factories: FactoryTables = {
   ModelAdapter: {
     // Real from P7. Cross-service boundary 2 — the daemon consumes ModelBindings by tag
@@ -138,11 +178,15 @@ const factories: FactoryTables = {
       new OpenAICompatibleAdapter({ modelsUrl: MODELS_URL, forgeUrl: FORGE_URL }),
   },
   ToolProvider: {
-    // Real from P7. Merges built-ins with search_knowledge behind one interface, so the
-    // loop asks one thing what tools a Run has (R15 — the loop imports no concrete
-    // implementation). MCP tools join in P12.
+    // Real from P7. Merges built-ins, search_knowledge and — from P12 — the granted MCP
+    // servers' tools behind one interface, so the loop asks one thing what tools a Run has
+    // (R15 — the loop imports no concrete implementation).
     CompositeToolProvider: (deps) =>
       new CompositeToolProvider({
+        // R51. Without this line every `{server}__*` grant in a pinned snapshot expands to
+        // nothing and the whole MCP subsystem is written, tested and unreachable — the
+        // defect this repo has now shipped seven times.
+        mcp: mcpSessions,
         // The grant list is read from the Run's PINNED snapshot (invariant 2), never
         // re-derived from current config — that would let a Run gain or lose a tool its
         // pinned version never had.
@@ -190,7 +234,16 @@ const factories: FactoryTables = {
   },
   EventSink: {
     // The one real implementation in P3. Invariant 5 lives here.
-    PostgresEventSink: (deps) => new PostgresEventSink(deps.pool, deps.credentialEnvNames),
+    //
+    // Wrapped for P12: a Run's MCP servers are disconnected when its `run_end` Event is
+    // appended (data-flow step 14). Invariant 6 guarantees every Run reaches that Event, so
+    // no session can outlive its Run — and the wrapper delegates `name`, so
+    // GET /api/health still reports what config/plugins.yaml selected.
+    PostgresEventSink: (deps) =>
+      closeMcpSessionsOnRunEnd(
+        new PostgresEventSink(deps.pool, deps.credentialEnvNames),
+        mcpSessions,
+      ),
   },
 };
 
@@ -268,8 +321,11 @@ const agentContext = createContextProvider({
   forgeUrl: FORGE_URL,
   runtimeConfig,
   sandboxProfiles: sandboxProfiles as unknown as Record<string, Record<string, unknown>>,
-  // NAMES only. The values behind them are env var names, never secrets (R59).
-  mcpServers: Object.keys((mcpConfig['servers'] ?? {}) as Record<string, unknown>),
+  // NAMES only, from the VALIDATED config. Agent Definition R18 rejects a `tools.mcp`
+  // entry absent from this list, so it has to be the real server names: `servers` is a
+  // LIST, and the previous `Object.keys` over it yielded array indices — "0", "1" — which
+  // meant every correctly-named grant failed validation and every entry named "0" passed.
+  mcpServers: mcp.servers.map((server) => server.name),
 });
 
 const agentRoutes = createAgentRoutes(agentStore, agentContext);
@@ -446,6 +502,10 @@ function shutdown(): void {
   shuttingDown = true;
   void gateway
     .close()
+    // P12 — every stdio MCP server is a CHILD OF THIS PROCESS. Exiting without closing
+    // them is the container-orphan problem again, on the other side of the sandbox
+    // boundary, and there is no startup sweep for a process tree.
+    .then(() => mcpSessions.closeAll())
     .then(() => pool.end())
     .then(() => process.exit(0));
 }

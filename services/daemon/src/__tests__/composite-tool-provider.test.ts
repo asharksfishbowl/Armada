@@ -108,9 +108,77 @@ describe('CompositeToolProvider.list', () => {
     assert.deepEqual(names, ['shell']);
   });
 
-  test('a granted MCP name is simply absent until P12, not faked', async () => {
-    const names = (await provider(['shell', 'github__create_issue']).list(ctx())).map((s) => s.name);
+  test('a granted MCP server is absent when no MCP source is configured, not faked', async () => {
+    // MCP is OPT-IN and ships disabled: config/mcp-servers.yaml declares no server, so a
+    // default installation constructs no session manager work at all. A grant that cannot
+    // be served must produce a name the model never sees, never a placeholder.
+    const names = (await provider(['shell', 'github__*']).list(ctx())).map((s) => s.name);
     assert.deepEqual(names, ['shell']);
+  });
+});
+
+describe('R51 — the MCP source is the third tool source', () => {
+  /** Stands in for McpSessionManager. Its own behaviour is covered by mcp-session.test.ts. */
+  function withMcp(granted: string[], seen: { servers?: string[]; invoked?: string } = {}) {
+    return new CompositeToolProvider({
+      grantsFor: async () => granted,
+      retrieval: () => retrieval,
+      searchOptions: { searchMaxK: 10, defaultK: 4 },
+      mcp: {
+        async list(_ctx, servers) {
+          seen.servers = servers;
+          return servers.map((server) => ({
+            name: `${server}__ping`,
+            description: 'ping',
+            parameters: { type: 'object' },
+          }));
+        },
+        async invoke(_ctx, name) {
+          seen.invoked = name;
+          return { content: `dispatched ${name}` };
+        },
+      },
+    });
+  }
+
+  test('merges MCP tools with built-ins behind ONE interface', async () => {
+    const names = (await withMcp(['shell', 'finish', 'github__*', 'docs__*']).list(ctx())).map(
+      (s) => s.name,
+    );
+    assert.deepEqual(names, ['shell', 'finish', 'github__ping', 'docs__ping']);
+  });
+
+  test('the SERVERS come from the pinned snapshot, never from config (invariant 2)', async () => {
+    const seen: { servers?: string[] } = {};
+    await withMcp(['finish', 'github__*'], seen).list(ctx());
+    assert.deepEqual(seen.servers, ['github']);
+  });
+
+  test('a namespaced call is dispatched to the MCP source', async () => {
+    const seen: { invoked?: string } = {};
+    const result = await withMcp(['github__*'], seen).invoke('github__ping', {}, ctx());
+    assert.equal(seen.invoked, 'github__ping');
+    assert.equal(result.content, 'dispatched github__ping');
+  });
+
+  test('a namespaced call with no MCP grant takes the R29 path, not the built-in one', async () => {
+    // `dispatchBuiltin` would answer "is not a built-in tool", which tells a model nothing
+    // about why its MCP call failed.
+    const result = await withMcp(['shell']).invoke('github__ping', {}, ctx());
+    assert.equal(result.isError, true);
+    assert.match(result.content, /unknown tool `github__ping`/);
+    assert.match(result.content, /shell/);
+  });
+
+  test('the MCP branch cannot capture a built-in — none carries the `__` separator', async () => {
+    const seen: { invoked?: string } = {};
+    const result = await withMcp(['finish', 'github__*'], seen).invoke(
+      'finish',
+      { success: true, summary: 'done' },
+      ctx(),
+    );
+    assert.equal(seen.invoked, undefined);
+    assert.equal(result.content, 'done');
   });
 });
 
