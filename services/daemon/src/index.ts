@@ -91,13 +91,16 @@ const modelsConfig = readYaml('models.yaml');
 // R59 — NAMES only. Values are read inside the sink, from this process's environment.
 const credentialEnvNames = collectCredentialEnvNames([mcpConfig, modelsConfig, runtimeConfig]);
 
-// build-plan Req 29 — a profile declaring `network: egress_allowlist` is REJECTED here,
-// at config load, rather than downgraded to `none`. A downgrade would leave a profile
-// that appears to filter egress while filtering nothing.
+// build-plan Req 29 — a profile declaring `network: egress_allowlist` is validated HERE,
+// at config load, and REFUSED naming every fault when the subsystem behind it cannot be
+// provisioned — never downgraded to `none`, which would leave a profile that appears to
+// filter egress while filtering nothing. P14 makes the mode real; the `egress:` block
+// carries the proxy image it needs.
 let sandboxProfiles: Record<string, SandboxProfile>;
 try {
   sandboxProfiles = validateProfiles(
     (sandboxConfig['profiles'] ?? {}) as Record<string, Partial<SandboxProfile>>,
+    sandboxConfig['egress'],
   );
 } catch (err) {
   fail('sandbox profiles are invalid', [err instanceof Error ? err.message : String(err)]);
