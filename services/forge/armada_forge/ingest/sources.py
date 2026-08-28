@@ -214,16 +214,40 @@ def fetch(source_type: str, location: str) -> FetchedSource:
     return fetcher(location)
 
 
+def _glob_match(rel_path: str, pattern: str) -> bool:
+    """Match one glob, giving `**/` its conventional meaning.
+
+    fnmatch has no globstar. It translates `**/*.md` to a regex requiring a literal
+    `/`, so that pattern matches `docs/guide.md` and NOT `guide.md` — every file at
+    the root of the Source is silently skipped.
+
+    That matters because `**/*.md` is how nearly everyone writes "all markdown files":
+    it is what bash globstar, Python's pathlib, and git pathspecs all mean by it. An
+    operator using the idiomatic pattern got a silently smaller Corpus and nothing said
+    so. This cost three CI runs to find, and only because the fixture happened to sit at
+    the root.
+
+    So a leading `**/` matches zero directories as well as many.
+    """
+    if fnmatch.fnmatch(rel_path, pattern):
+        return True
+    # `**/x` should also match `x`. Strip the prefix and retry; this is the only place
+    # fnmatch's semantics and the conventional ones disagree for the patterns R6 accepts.
+    if pattern.startswith("**/"):
+        return fnmatch.fnmatch(rel_path, pattern[3:])
+    return False
+
+
 def matches_globs(rel_path: str, include: list[str], exclude: list[str]) -> bool:
     """Apply a Source's include/exclude globs (R6).
 
     Exclude wins over include: an operator listing `**/*.md` and excluding `vendor/**`
     means the vendor copies stay out, not that the include re-admits them.
     """
-    if any(fnmatch.fnmatch(rel_path, pattern) for pattern in exclude):
+    if any(_glob_match(rel_path, pattern) for pattern in exclude):
         return False
     if include:
-        return any(fnmatch.fnmatch(rel_path, pattern) for pattern in include)
+        return any(_glob_match(rel_path, pattern) for pattern in include)
     return True
 
 
