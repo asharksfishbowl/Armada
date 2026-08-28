@@ -26,6 +26,10 @@ set -uo pipefail
 # container — it is the one path the daemon and Docker agree on, so the fixture lives
 # under it.
 ARMADA_WORKSPACE_ROOT="${ARMADA_WORKSPACE_ROOT:-/var/lib/armada/workspaces}"
+# R8a — forge's ingest root is a SEPARATE mount from the daemon's workspace root, and
+# deliberately so: sharing one would couple sandbox provisioning to corpus ingestion
+# across cross-service boundary 1.
+ARMADA_INGEST_ROOT="${ARMADA_INGEST_ROOT:-/var/lib/armada/ingest}"
 
 # Ports and their override names already exist in docker-compose.yml. Reused, not invented.
 FORGE_PORT="${ARMADA_FORGE_PORT:-8000}"
@@ -126,7 +130,8 @@ api()      { curl -sS --max-time 30 "$@" 2>/dev/null; }
 api_code() { curl -sS --max-time 30 -o /dev/null -w '%{http_code}' "$@" 2>/dev/null; }
 
 printf '\033[1mArmada smoke test\033[0m\n'
-printf 'forge %s · daemon %s · workspace root %s\n' "$FORGE" "$DAEMON" "$ARMADA_WORKSPACE_ROOT"
+printf 'forge %s · daemon %s · workspace %s · ingest %s\n' \
+    "$FORGE" "$DAEMON" "$ARMADA_WORKSPACE_ROOT" "$ARMADA_INGEST_ROOT"
 
 # ── 0. CLEAN SLATE ───────────────────────────────────────────────────────────
 section '0. Clean slate'
@@ -398,7 +403,11 @@ restore_and_wait_for_forge
 # ── 7. INGESTION ─────────────────────────────────────────────────────────────
 section '7. Corpus ingestion'
 
-fixture="${ARMADA_WORKSPACE_ROOT}/smoke-fixture"
+# R8a — ARMADA_INGEST_ROOT, not ARMADA_WORKSPACE_ROOT. The workspace root is mounted into
+# armada-daemon alone, for sandbox provisioning; FORGE does the ingesting and cannot see
+# it. Writing the fixture there is precisely the bug section 7 kept reporting: the glob
+# matched nothing and the ingest reported success over an empty tree.
+fixture="${ARMADA_INGEST_ROOT}/smoke-fixture"
 if mkdir -p "$fixture" 2>/dev/null; then
     cat > "${fixture}/guide.md" <<'MD'
 # Deployment guide
@@ -440,8 +449,14 @@ MD
         # BOTH assertions are needed and neither is redundant: the dimension query returns
         # EMPTY when every embedding is NULL, so it passes vacuously on its own; and the
         # null count passes at the wrong dimension.
+        # GATED ON A NON-ZERO BASELINE. "no NULL embeddings" is satisfied by the empty
+        # set, so over zero chunks this reported PASS while proving nothing. Any assertion
+        # whose predicate an empty set satisfies must SKIP, never pass, without a baseline.
         null_embeddings="$(psql_q 'SELECT count(*) FROM chunks WHERE embedding IS NULL')"
-        if [ "${null_embeddings:-}" = "0" ]; then
+        if [ "${chunks:-0}" -eq 0 ]; then
+            skip 'every chunk carries a non-NULL embedding (R11)' \
+                 'no chunks were ingested — an absence assertion over an empty set proves nothing'
+        elif [ "${null_embeddings:-}" = "0" ]; then
             pass 'every chunk carries a non-NULL embedding (R11)'
         else
             fail 'every chunk carries a non-NULL embedding (R11)' '0 NULL embeddings' \
@@ -464,7 +479,14 @@ MD
         api -X POST "${FORGE}/corpora/${corpus_id}/ingest" >/dev/null
         sleep 8
         job="$(api "${FORGE}/corpora/${corpus_id}" | jq -r '.latest_job | "\(.chunks_added) \(.chunks_removed)"' 2>/dev/null)"
-        if [ "$job" = "0 0" ]; then
+        # SAME GATE. "0 added, 0 removed" is trivially true when there was nothing to
+        # re-ingest. This assertion covers the (content_sha256, source_path) pair keying
+        # that edge 17 turns on — the subtlest invariant in the ingestion path — so a
+        # vacuous pass here is the most expensive one in the script.
+        if [ "${chunks:-0}" -eq 0 ]; then
+            skip 're-ingesting unchanged adds and removes zero (R14)' \
+                 'no chunks were ingested — 0 == 0 is trivially true and proves no idempotence'
+        elif [ "$job" = "0 0" ]; then
             pass 're-ingesting unchanged adds and removes zero (R14)'
         else
             fail 're-ingesting unchanged adds and removes zero (R14)' '0 added, 0 removed' "$job"
@@ -474,7 +496,7 @@ MD
     fi
     rm -rf "$fixture"
 else
-    skip 'Corpus ingestion' "cannot create ${fixture} — check ARMADA_WORKSPACE_ROOT permissions"
+    skip 'Corpus ingestion' "cannot create ${fixture} — check ARMADA_INGEST_ROOT permissions"
 fi
 
 # ── 8. ZERO SPEND ────────────────────────────────────────────────────────────
