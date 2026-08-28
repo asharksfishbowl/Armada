@@ -155,19 +155,27 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.ci-internal.yml up -d
           echo "Stack is up on an internal network — no route off the host."
 
-          # 300s, not 120s. This is a COLD boot: the step above ran `down -v`, so the
-          # database is empty and migrations re-run before forge answers. The smoke
-          # script's own boot takes ~2 minutes, and the previous 120s budget expired
-          # while the stack was still starting — reporting "never became healthy with
-          # egress severed" for a stack that was merely slow, and blaming the egress
-          # change for it.
+          # QUERIED FROM INSIDE THE NETWORK, NOT FROM THE RUNNER.
+          #
+          # `internal: true` removes the network's gateway, and that also disables
+          # published port mapping — so localhost:8000 on the runner is unreachable even
+          # while the stack is perfectly healthy. The previous version curled from the
+          # host, timed out, and reported "forge never became healthy with egress
+          # severed" while the forge logs showed it answering 200 OK to its own
+          # healthcheck and to peer containers throughout.
+          #
+          # That is the third time in this pipeline a true statement named the wrong
+          # cause. Observing from inside the boundary is the only way to test a boundary
+          # that, by design, blocks observation from outside.
+          # One line: python -c rejects the indentation a YAML block would impose.
+          q() { docker compose exec -T armada-forge python -c "import sys,urllib.request; print(urllib.request.urlopen('http://localhost:8000'+sys.argv[1], timeout=10).read().decode())" "$1" 2>/dev/null; }
+
           ok=0
           for _ in $(seq 1 150); do
-            if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then ok=1; break; fi
+            if q /health >/dev/null 2>&1; then ok=1; break; fi
             sleep 2
           done
           if [ "$ok" != 1 ]; then
-            # Distinguish slow from broken, which the bare error could not.
             echo "::group::state at timeout"
             docker compose ps -a || true
             docker compose logs --tail 60 armada-forge armada-db armada-migrate || true
@@ -175,15 +183,15 @@ jobs:
             echo "::error::forge never became healthy with egress severed"
             exit 1
           fi
+          echo "forge is healthy with no route off the host."
 
           # Registration must not require reaching any model provider.
-          n=$(curl -fsS http://localhost:8000/models/bindings | jq '[.[]|select(.status=="promoted")]|length')
+          n="$(q /models/bindings | jq '[.[]|select(.status=="promoted")]|length')"
           echo "promoted bindings with no egress: $n"
           [ "$n" = "5" ] || { echo "::error::expected 5 promoted bindings, got $n"; exit 1; }
 
           # And the baked model must still answer, since it was never downloaded.
-          curl -fsS http://localhost:8000/models/bindings \
-            | jq -e '[.[]|select(.materialized==true)]|length == 1' >/dev/null \
+          q /models/bindings | jq -e '[.[]|select(.materialized==true)]|length == 1' >/dev/null \
             || { echo "::error::baked smoke model is not materialized under zero egress"; exit 1; }
 
           echo "Invariant 7 holds: the default path needs no egress."
