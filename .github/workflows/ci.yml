@@ -112,9 +112,13 @@ jobs:
       # real default keeps CI honest about what it verified.
       - name: Provision workspace root
         run: |
-          sudo mkdir -p /var/lib/armada/workspaces
+          # Two roots, deliberately separate (R8a). `workspaces` is the daemon's, for
+          # sandbox provisioning. `ingest` is forge's, for `directory` Sources. Sharing
+          # one would couple sandbox provisioning to corpus ingestion across
+          # cross-service boundary 1.
+          sudo mkdir -p /var/lib/armada/workspaces /var/lib/armada/ingest
           sudo chown -R "$(id -u):$(id -g)" /var/lib/armada
-          ls -ld /var/lib/armada/workspaces
+          ls -ld /var/lib/armada/workspaces /var/lib/armada/ingest
 
       - name: Smoke test
         run: ./scripts/smoke-test.sh

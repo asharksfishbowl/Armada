@@ -134,9 +134,21 @@ services:
       # Forge registers bindings with the model server and reconciles materialization
       # against it at startup (R4h) — cross-service boundary 2.
       ARMADA_MODELS_URL: http://armada-models:11434
+      # R8 — where a `directory` Source may read from. Mounted at the SAME path on
+      # both sides so a path the operator types is the path forge opens; a rewritten
+      # path would make an error message name a location that does not exist for them.
+      #
+      # DELIBERATELY NOT the daemon's ARMADA_WORKSPACE_ROOT. That root exists so the
+      # daemon can hand Docker a host path when provisioning a sandbox (R45c) — a
+      # runtime concern. Ingestion is a forge concern. Sharing one mount for both
+      # would couple sandbox provisioning to corpus ingestion across cross-service
+      # boundary 1, where forge writes the index and the daemon only ever reads it.
+      ARMADA_INGEST_ROOT: ${ARMADA_INGEST_ROOT:-/var/lib/armada/ingest}
     volumes:
       - ./config:/config:ro
       - armada-forge-data:/data
+      # Read-only: ingestion reads source material and never writes back to it.
+      - ${ARMADA_INGEST_ROOT:-/var/lib/armada/ingest}:${ARMADA_INGEST_ROOT:-/var/lib/armada/ingest}:ro
     # Req 17 — forge loads the embedding model and, from P11, merges adapters. An
     # unbounded container competes with armada-models for the same host RAM.
     deploy:
