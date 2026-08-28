@@ -143,8 +143,8 @@ the pipeline when a task first needs one.
 | `armada-daemon` | Node 22, TypeScript strict, `node:http` (no framework yet), `pg` | Phase 0 |
 | `armada-db` | `pgvector/pgvector:pg16`; `gen_random_uuid()` from core, not `uuid-ossp` | Phase 0 |
 | Migrations | Plain SQL under `db/migrations/`, applied by `db/apply-migrations.sh`, tracked in `schema_migrations` | Phase 0 |
-| `armada-dashboard` | **Undecided.** Phase 0 ships an nginx static placeholder precisely so Phase 8 can pick the bundler and state library | — |
-| Test framework | forge → `pytest` (`requirements-dev.txt`); daemon → **`node:test`** via `node --test`, built into Node 22 — no new dependency. **Every phase lands its own tests before it is marked done.** | Rule 9 / ISSUE #7 |
+| `armada-dashboard` | React 19 + **Vite 7**, TypeScript strict, **`react-router-dom` 7**, and **no state library** — React hooks plus a small `useResource`/`useAction` pair. `yaml` (ISC) for the client-side field-path→line mapping R73 needs. Two-stage Docker build; nginx serves the bundle *and* proxies `/api` + `/ws` → daemon and `/forge/` → forge, because neither service emits a CORS header or answers a preflight, so the dashboard must be same-origin with both | Phase 9 |
+| Test framework | forge → `pytest` (`requirements-dev.txt`); daemon and dashboard → **`node:test`** via `node --test`, built into Node 22 — no new dependency. **Every phase lands its own tests before it is marked done.** | Rule 9 / ISSUE #7 |
 | Test execution | Manual via `scripts/smoke-test.sh` on a Docker host now; **GitHub Actions CI after P7**, once the agent loop exists and the end-to-end path is stable enough to guard | ISSUE #7 |
 | Linter / formatter | **Undecided** for both services | — |
 
@@ -165,6 +165,15 @@ the pipeline when a task first needs one.
   Unit tests must not need Docker, Postgres, or armada-models; anything that does is
   marked `@pytest.mark.integration` (forge) or noted and left out (daemon), so units can
   run on every push.
+- **The dashboard has no DOM test renderer, deliberately.** Its suite is scoped to pure
+  logic — the status vocabulary, the token contrast and desaturation assertions, the YAML
+  field-path anchoring, the version-pin derivation, and the route manifest. The design
+  spec's own exit criteria (contrast, per-family desaturation) are assertions about
+  *tokens*, not about a DOM, and `src/styles/tokens.css` is read as TEXT by the test so it
+  guards the stylesheet the browser actually loads rather than a TypeScript mirror of it.
+  `src/__tests__/routes.test.ts` is the anti-unwiring test: it fails if a page exists but is
+  not in the route manifest, if a nav destination has no route, or if `App.tsx` stops
+  mapping over the manifest.
 - **Daemon tests COMPILE before running** (`tsc && node --test "dist/__tests__/*.test.js"`).
   Node 22 can run `.ts` directly via type stripping, but strip-only mode rejects
   TypeScript *parameter properties* (`constructor(private readonly x: T)`), which this

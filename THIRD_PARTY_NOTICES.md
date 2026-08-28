@@ -89,10 +89,48 @@ Training dependencies (`peft`, `trl`, `transformers`, `torch`) are Apache 2.0 / 
 | Package | License |
 |---|---|
 | `pg` | MIT |
+| `ws` | MIT |
+| `yaml` | ISC |
 | `typescript` | Apache 2.0 |
-| `@types/node`, `@types/pg` | MIT |
+| `@types/node`, `@types/pg`, `@types/ws` | MIT |
 
 All permissive.
+
+---
+
+## Node dependencies (`services/dashboard/package.json`)
+
+Added in Phase 9, which is the phase that chose the dashboard's build tooling — Phase 0
+deliberately shipped an nginx placeholder so the bundler and router would be picked by the
+phase that needed them.
+
+| Package | License | Notes |
+|---|---|---|
+| `react`, `react-dom` | MIT | — |
+| `react-router-dom`, `react-router` | MIT | — |
+| `yaml` | ISC | Client-side YAML CST, for mapping a validation error's field path to a line. Already a daemon dependency at the same major version. |
+| `vite` | MIT | Build tooling, not shipped in the bundle |
+| `@vitejs/plugin-react` | MIT | Build tooling |
+| `typescript` | Apache 2.0 | Build tooling |
+| `@types/react`, `@types/react-dom`, `@types/node` | MIT | Types only, erased at build |
+
+All permissive. The full transitive tree was audited at the time of adding: 66 MIT, 6 ISC,
+2 Apache-2.0, 1 BSD-3-Clause, and `caniuse-lite` under CC-BY-4.0. **No GPL, AGPL, or LGPL
+anywhere in the dashboard tree** — `psycopg` remains the platform's only copyleft
+dependency.
+
+`caniuse-lite`'s CC-BY-4.0 covers a browser-support **data set** consumed by browserslist at
+build time. It is a build-time dev dependency, none of its data is emitted into the bundle,
+and it is not redistributed, so no attribution obligation attaches to shipping Armada.
+
+**No test-framework dependency was added.** The dashboard is tested with `node:test`, built
+into Node 22, for the same reason the daemon is: nothing new to install and nothing new to
+record here.
+
+**No webfont is fetched at runtime.** The design spec names Inter and JetBrains Mono, but
+the dashboard links no font service and bundles no font file — it declares both families
+with system fallback stacks. This is a licensing non-event by construction, and it is also
+what keeps a default install from making an external request on every page load.
 
 ---
 

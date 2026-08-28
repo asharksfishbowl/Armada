@@ -1,0 +1,380 @@
+/*
+ * Application styles. Every value here resolves to a token from tokens.css — no component
+ * and no rule introduces a colour, size, spacing value, or radius outside that set, which
+ * is the design spec's first acceptance criterion.
+ *
+ * DESKTOP ONLY, >=1280px. There is no media query for width anywhere in this file. Edge
+ * case 39: below 1280px the content area scrolls horizontally rather than reflowing, which
+ * `min-width` on the content column produces for free. A breakpoint here would be the
+ * beginning of the mobile layout the project lists as a non-goal.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--surface-0);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-body-sm);
+  line-height: var(--leading-body-sm);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── The type ramp. Exactly six sizes (Requirement 7). ─────────────────────────────── */
+
+.text-micro     { font-size: var(--text-micro);     line-height: var(--leading-micro); }
+.text-mono-body { font-size: var(--text-mono-body); line-height: var(--leading-mono-body); font-family: var(--font-mono); }
+.text-body-sm   { font-size: var(--text-body-sm);   line-height: var(--leading-body-sm); }
+.text-body      { font-size: var(--text-body);      line-height: var(--leading-body); }
+.text-section   { font-size: var(--text-section);   line-height: var(--leading-section); font-weight: var(--weight-semibold); }
+.text-page      { font-size: var(--text-page);      line-height: var(--leading-page); font-weight: var(--weight-semibold); }
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover { color: var(--accent-hover); }
+
+/* ── Shell (Requirements 33-36) ────────────────────────────────────────────────────── */
+
+.app-shell {
+  display: flex;
+  height: 100%;
+}
+
+.nav-rail {
+  width: var(--rail-width);
+  flex: 0 0 var(--rail-width);
+  background: var(--surface-1);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+}
+
+.nav-brand {
+  padding: var(--space-6) var(--space-4) var(--space-4);
+  color: var(--fg);
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-4);
+  color: var(--fg-muted);
+  border-left: 2px solid transparent;
+  transition: background-color 80ms linear;
+}
+
+.nav-item:hover { background: var(--surface-2); color: var(--fg); }
+
+/* Requirement 35 — 2px accent left edge plus --accent-wash. The edge is drawn by the
+   sliding indicator element, so the item itself carries only the wash. */
+.nav-item-active {
+  background: var(--accent-wash);
+  color: var(--fg);
+}
+
+/* Requirement 30 — the ONLY navigation badge in the application. */
+.nav-badge {
+  margin-left: auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-chip);
+  background: var(--tint-fault);
+  color: var(--status-fault);
+  font-size: var(--text-micro);
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-content {
+  flex: 1;
+  /* Requirement 39 / edge 39 — horizontal scroll below 1280px, never a reflow. */
+  min-width: calc(var(--min-viewport) - var(--rail-width));
+  overflow: auto;
+  padding: var(--space-6);
+  background: var(--surface-1);
+}
+
+/* ── Tables (Requirements 37, 10, 15) ──────────────────────────────────────────────── */
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+}
+
+.data-table th {
+  text-align: left;
+  font-size: var(--text-micro);
+  line-height: var(--leading-micro);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line-strong);
+  white-space: nowrap;
+}
+
+.data-table td {
+  height: var(--row-table);
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+/* Requirement 15: background-color 80ms and NOTHING else. No shadow, no entrance
+   animation, no height transition. Requirement 48a: hover is --surface-3 and selection is
+   an accent left edge; neither is a tint. */
+.data-table tbody tr {
+  cursor: pointer;
+  transition: background-color 80ms linear;
+}
+.data-table tbody tr:hover { background: var(--surface-3); }
+.row-selected {
+  background: var(--surface-4);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* ── Controls ──────────────────────────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 28px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: var(--text-body-sm);
+  cursor: pointer;
+  transition: background-color 80ms linear;
+}
+.btn:hover:not(:disabled) { background: var(--surface-3); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Requirement 5 — the accent appears on primary buttons, the focus ring, the active nav
+   item, and the left edge of a selected row. Nowhere else. */
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--surface-0);
+  font-weight: var(--weight-medium);
+}
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+
+/* Requirement 131a — Delete renders in --status-fault TEXT, not as a filled red button.
+   A filled destructive button competes with the primary action for the eye. */
+.btn-destructive {
+  color: var(--status-fault);
+  border-color: var(--line-strong);
+  background: transparent;
+}
+
+.btn-quiet {
+  height: 22px;
+  padding: 0 var(--space-2);
+  border-color: transparent;
+  background: transparent;
+  color: var(--fg-muted);
+}
+.btn-quiet:hover:not(:disabled) { background: var(--surface-3); color: var(--fg); }
+
+.input {
+  height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-1);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: var(--text-body-sm);
+}
+textarea.input { height: auto; padding: var(--space-2); line-height: var(--leading-body-sm); }
+
+.tab {
+  height: 26px;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--fg-muted);
+  font-family: inherit;
+  font-size: var(--text-body-sm);
+  cursor: pointer;
+}
+.tab-active { background: var(--surface-3); color: var(--fg); border-color: var(--line-strong); }
+
+/* Requirement 78 — suggestion chips write the chosen value into the document. */
+.suggestion-chip {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-chip);
+  background: var(--surface-2);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  line-height: 18px;
+  padding: 0 var(--space-2);
+  cursor: pointer;
+}
+.suggestion-chip:hover { background: var(--surface-3); }
+
+/* Requirement 131 — capability chips. Achromatic: a capability is not a status. */
+.capability-chip {
+  border-radius: var(--radius-chip);
+  background: var(--surface-3);
+  color: var(--fg-muted);
+  font-size: var(--text-micro);
+  line-height: 18px;
+  padding: 0 var(--space-2);
+  white-space: nowrap;
+}
+
+/* ── Copy affordance (Requirement 144): a RESERVED gutter, so nothing shifts on hover. ─ */
+
+.copy-token-control { opacity: 0; transition: opacity 80ms linear; }
+.copy-token:hover .copy-token-control,
+.copy-token-control:focus-visible { opacity: 1; }
+
+/* ── Progress line (Requirement 126, build-plan Requirement 11): 2px, in place. ─────── */
+
+.progress-line {
+  display: block;
+  width: 100%;
+  height: 2px;
+  background: var(--surface-4);
+  border-radius: var(--radius-chip);
+  position: relative;
+  overflow: hidden;
+}
+.progress-line::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--progress, 0%);
+  background: var(--status-live);
+}
+
+/* ── Editor (Requirements 74-76) ───────────────────────────────────────────────────── */
+
+.editor-surface {
+  background: var(--surface-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-mono-body);
+  line-height: var(--leading-mono-body);
+}
+
+.editor-gutter {
+  flex: 0 0 48px;
+  padding: var(--space-3) var(--space-2);
+  text-align: right;
+  color: var(--fg-dim);
+  background: var(--surface-3);
+  user-select: none;
+}
+.editor-gutter-line { height: var(--leading-mono-body); }
+.editor-marker { font-weight: var(--weight-semibold); }
+
+.editor-body {
+  position: relative;
+  flex: 1;
+  min-height: 100%;
+}
+
+/* The overlay and the textarea must share every metric that affects glyph position, or
+   the squiggles drift from the text they underline. */
+.editor-overlay,
+.editor-input {
+  margin: 0;
+  padding: var(--space-3);
+  border: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-mono-body);
+  line-height: var(--leading-mono-body);
+  white-space: pre-wrap;
+  word-break: break-word;
+  tab-size: 2;
+}
+
+.editor-overlay {
+  position: absolute;
+  inset: 0;
+  color: transparent;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.editor-input {
+  position: relative;
+  width: 100%;
+  min-height: 100%;
+  background: transparent;
+  color: var(--fg);
+  resize: none;
+  outline: none;
+}
+
+/* Requirement 74 — the squiggle. Requirement 15 forbids animating it. */
+.squiggle {
+  text-decoration: underline wavy;
+  text-underline-offset: 3px;
+}
+.squiggle-hovered { background: var(--surface-3); }
+
+/* Requirement 75.1 — dimmed, italic, non-editable, click-to-insert. --fg-dim is permitted
+   here by Requirement 140's exemption: it is accompanied by an adjacent full-contrast
+   label in the problems panel. */
+.phantom-line {
+  position: absolute;
+  right: var(--space-3);
+  border: 0;
+  background: transparent;
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-size: var(--text-mono-body);
+  line-height: var(--leading-mono-body);
+  font-style: italic;
+  cursor: pointer;
+  padding: 0;
+}
+.phantom-line:hover { color: var(--fg-muted); }
+
+/* Requirement 81's 600ms idle debounce, expressed as a restartable animation rather than
+   a timer. YamlEditor remounts this element on every keystroke, which restarts it; its
+   `animationend` is the "operator stopped typing" event. See YamlEditor.tsx. */
+.validate-debounce {
+  position: absolute;
+  width: 0;
+  height: 0;
+  animation: armada-debounce 600ms linear;
+}
+
+@keyframes armada-debounce {
+  from { opacity: 0; }
+  to   { opacity: 0; }
+}
+
+/* The debounce is NOT disabled under reduced motion. It is a duration, not a movement, and
+   removing the animation would remove the event that triggers validation entirely. */
+
+.problems-panel { min-height: 0; }

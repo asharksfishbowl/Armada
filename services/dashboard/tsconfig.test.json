@@ -1,0 +1,33 @@
+{
+  "//": [
+    "The TEST compile. `npm test` runs `tsc -p tsconfig.test.json && node --test`, for the",
+    "same reason the daemon does (CLAUDE.md): compiling first type-checks the tests, and a",
+    "type error is a test failure rather than something a runner silently strips.",
+    "",
+    "WHY commonjs HERE AND ESNext IN tsconfig.json. Vite consumes the sources directly and",
+    "resolves extensionless relative imports itself. Node does not: under ESM it requires a",
+    "file extension on every relative specifier, which would mean writing `./x.js` in TSX",
+    "that Vite then has to be taught to resolve back to `./x.tsx`. Emitting CommonJS for the",
+    "test run sidesteps that entirely — node resolves extensionless paths, `react/jsx-runtime`",
+    "resolves, and the SAME source files are checked and executed. This is also why",
+    "package.json has no `\"type\": \"module\"`.",
+    "",
+    "The consequence, stated so it is not rediscovered: `import.meta` is unavailable under",
+    "CommonJS, so no source file may use `import.meta.env`. Nothing needs it — the client is",
+    "same-origin with both services through the nginx proxy, so every request path is",
+    "relative and there is no base URL to inject."
+  ],
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "verbatimModuleSyntax": false,
+    "isolatedModules": false,
+    "noEmit": false,
+    "outDir": "dist-test",
+    "rootDir": ".",
+    "sourceMap": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["src/main.tsx"]
+}

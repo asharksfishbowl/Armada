@@ -27,3 +27,6 @@ docker-compose.override.yml
 design-references/*
 !design-references/.gitkeep
 !design-references/README.md
+
+# Dashboard test compile output
+services/dashboard/dist-test/

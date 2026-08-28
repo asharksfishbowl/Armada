@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<!--
+  Vite's entry document. It replaces the Phase 0 placeholder that used to live at
+  public/index.html, which hardcoded NEAR-COPIES of the design spec's palette (#0b0d10 for
+  --surface-0, #16191f for --surface-2, and so on) while claiming in its own comment that
+  the colours were lifted from the spec. They were not, and after the Armada Oak amendment
+  they were not even close. That file is deleted rather than corrected: the values now come
+  from src/styles/tokens.css, which is the single source of truth and is the file the
+  contrast test reads. Restating a token anywhere is what created that defect.
+
+  NO WEBFONT IS FETCHED, DELIBERATELY. Requirement 6 names Inter and JetBrains Mono, and
+  the obvious implementation is a Google Fonts <link>. That would make every page load
+  perform an external transfer, which breaks the platform's standing property that a
+  default install contacts nothing — "a change that makes the default path require a key or
+  a GPU is a regression", and reaching out for a font is the same class of regression on a
+  trusted-network, self-hosted console. tokens.css therefore names both families with full
+  system fallback stacks: an operator who has them installed gets them, and one who does
+  not gets the system UI and monospace faces. The design's structure does not depend on the
+  specific faces — Requirement 6's real requirement is that copyable values are MONOSPACE
+  and everything else is not, which the fallbacks preserve.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      No `width=device-width`. The dashboard targets a desktop browser at >=1280px
+      (Requirement 21's non-goal, edge case 39): below that the content area scrolls
+      horizontally and never reflows. A device-width viewport would invite exactly the
+      mobile layout the project lists as a non-goal.
+    -->
+    <meta name="viewport" content="width=1280" />
+    <title>Armada</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

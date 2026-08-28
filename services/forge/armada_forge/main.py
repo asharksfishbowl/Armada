@@ -238,6 +238,57 @@ def config_capabilities() -> dict[str, Any]:
     }
 
 
+@app.get("/models/base")
+def base_models() -> list[dict[str, Any]]:
+    """The curated BaseModel shortlist — design-dashboard.md Requirement 129, ADDED in P9.
+
+    WHY THIS EXISTS. Requirement 129 gives the shortlist table five columns:
+    `base_model_id`, `context_window`, `quantization`, `smoke_test`, and base binding
+    status. Only the last was reachable. `GET /models/bindings` reads the `model_bindings`
+    TABLE and reports what is registered and servable, while `quantization` and
+    `smoke_test` are properties of the shortlist FILE that are never written to that
+    table — so no join could have recovered them and the dashboard's only alternatives
+    were to fabricate two columns or render them permanently unavailable.
+
+    IT LIVES IN main.py, NOT registry/materialize.py, and not behind ShortlistEntry.
+    `registry/models.py` states outright that ShortlistEntry and TrainingEntry are two
+    views on purpose and that widening either to serve the other's consumer is the wrong
+    move; `quantization` lives on TrainingEntry, and a dashboard column is neither a
+    daemon-addressing concern nor a training concern. Serving it from the already-loaded
+    raw config — the same `_config` `/config/capabilities` reads — adds one route and
+    changes no existing type.
+
+    READ-ONLY BY CONSTRUCTION. `config/base-models.yaml` records that there is no
+    `POST /models/base` because the shortlist is file-configured only (R4). This does not
+    weaken that: it serves already-validated entries and offers no way to write one.
+
+    `serving_ref`, `hf_id`, `chat_template`, and `lora_target_modules` are deliberately
+    WITHHELD. They are serving- and training-engine internals with no column on any
+    dashboard surface, and an endpoint that returns everything invites a consumer that
+    depends on everything.
+    """
+    assert _config is not None
+
+    return [
+        {
+            "base_model_id": entry["id"],
+            "backend": entry.get("backend", "ollama"),
+            "context_window": int(entry["context_window"]),
+            "tool_format": entry["tool_format"],
+            "quantization": entry["quantization"],
+            "min_ram_gb": int(entry["min_ram_gb"]),
+            "min_disk_gb": int(entry["min_disk_gb"]),
+            "trainable": bool(entry["trainable"]),
+            "smoke_test": bool(entry.get("smoke_test", False)),
+            # R4a's tag for this entry's base binding, so a client can join this list to
+            # `GET /models/bindings` without reconstructing the naming scheme itself.
+            # Reconstructed tags are how two services come to disagree about a name.
+            "base_tag": registry_models.base_tag(entry["id"]),
+        }
+        for entry in sorted(_config.base_models, key=lambda e: str(e["id"]))
+    ]
+
+
 @app.websocket("/ws")
 async def progress_socket(websocket: WebSocket) -> None:
     """Unresolved Dependency 4 — ingestion progress, and from Phase 7 training progress.
