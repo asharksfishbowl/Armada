@@ -164,11 +164,34 @@ fi
 # ── 1. BOOT ──────────────────────────────────────────────────────────────────
 section '1. Boot'
 
+# ── A FAILED BUILD MUST SAY WHY, AND MUST NOT BE FOLLOWED BY 25 MORE FAILURES ──
+# This previously wrote the build output to a `mktemp` path and reported "see
+# /tmp/tmp.XXXX" — a file on a runner that is destroyed before anyone can read it. When
+# the build did fail, CI produced 26 FAILs, every one of them "<no response>" from a
+# stack that was never created, and not one line about the cause. It is the same defect
+# the `Collect logs` step in ci.yml already carries a comment about: evidence written to
+# a path nobody reads is evidence that does not exist.
+#
+# So: print it, and stop. Boot is the one assertion whose failure makes every later
+# assertion meaningless rather than merely unknown — the exception to the `-e` note at
+# the top of this file, not a departure from it. Continuing past it trades one known
+# cause for an unknown number of derived failures, which is the same bad trade the `-e`
+# note refuses, pointed the other way.
 build_log="$(mktemp)"
 if docker compose up -d --build >"$build_log" 2>&1; then
     pass 'docker compose up --build'
 else
-    fail 'docker compose up --build' 'exit 0' "exit $? — see $build_log"
+    rc=$?
+    fail 'docker compose up --build' "exit 0" "exit $rc"
+    printf '\n── build output (last 120 lines) ──\n'
+    tail -120 "$build_log"
+    printf '── end build output ──\n'
+    printf '\n  Boot failed. Every later assertion would report "<no response>" from a stack\n'
+    printf '  that was never created, so the cause above is the finding. Stopping here.\n'
+    printf '\n\033[1m── Summary\033[0m\n'
+    printf '  %s %d   %s %d   %s %d\n' "$(green PASS)" "$PASS" "$(red FAIL)" "$FAIL" "$(amber SKIP)" "$SKIP"
+    restore_shortlist
+    exit 1
 fi
 
 printf '  waiting for services (up to %ss)…\n' "$BOOT_TIMEOUT_SECONDS"
