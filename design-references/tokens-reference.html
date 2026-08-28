@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Armada — locked token &amp; status reference</title>
+<!--
+  NOT a playground. NOT a design exploration. No visual decision is made in this file.
+
+  This renders specs/dashboard/design-dashboard.md, which is COMPLETE AND LOCKED
+  (202 requirements). Every value below is transcribed from a numbered requirement,
+  cited inline. If this file and the spec disagree, THE SPEC IS RIGHT and this file
+  is a bug.
+
+  Purpose: give P9 (Dashboard core) a visual ground truth for the two exit criteria
+  that are otherwise only assertable in a test runner —
+    · R139  every status hue >= 4.5:1 on --surface-2 AND --surface-3
+    · R141/142b  per-family distinguishability under desaturation
+  Both are computed live on this page. Nothing is hardcoded as "passing".
+-->
+<style>
+/* ── Locked tokens · design-dashboard.md R2, R3, R4, R21, R26, R29 ───────── */
+:root {
+  --surface-0:#0A0C10; --surface-1:#10131A; --surface-2:#161A23;
+  --surface-3:#1E232E; --surface-4:#272D3A;
+  --line:#232936; --line-strong:#323A4A;
+
+  --fg:#E6EAF2; --fg-muted:#9AA4B8; --fg-dim:#6B7488;
+
+  --accent:#4C8DFF; --accent-hover:#6FA4FF;
+  --accent-wash:rgba(76,141,255,.12);          /* R4 — accent @ 12% */
+
+  --status-live:#38BDF8; --status-good:#34D399; --status-neutral:#8B96AC;
+  --status-warn:#F2B33D; --status-fault:#F26D6D; --status-pending:#A78BFA;
+
+  /* R6 — Inter / JetBrains Mono. Not vendored here; system fallbacks stand in.
+     Metrics differ from the real build. This page is for COLOUR and GEOMETRY. */
+  --font-ui:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--surface-0);color:var(--fg);font-family:var(--font-ui);
+     font-size:13px;line-height:20px;-webkit-font-smoothing:antialiased}
+h1{font-size:24px;line-height:32px;font-weight:600;margin:0}          /* R7 page */
+h2{font-size:18px;line-height:26px;font-weight:600;margin:0}          /* R7 section */
+code,.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}  /* R11 */
+
+.wrap{max-width:1180px;margin:0 auto;padding:32px 24px 96px}
+.head{border-bottom:1px solid var(--line-strong);padding-bottom:16px;margin-bottom:32px}
+.head p{color:var(--fg-muted);font-size:13px;margin:8px 0 0;max-width:70ch}
+.warnbar{margin-top:16px;padding:12px 16px;border:1px solid var(--status-warn);
+  background:rgba(242,179,61,.08);border-radius:6px;color:var(--fg);font-size:13px}
+
+section{margin-bottom:48px}
+.sechead{display:flex;align-items:baseline;gap:12px;padding-bottom:8px;
+  border-bottom:1px solid var(--line);margin-bottom:16px}
+.req{font-family:var(--font-mono);font-size:11px;line-height:16px;color:var(--accent);
+  border:1px solid var(--line-strong);border-radius:4px;padding:1px 6px}
+.note{color:var(--fg-muted);font-size:13px;margin:0 0 16px;max-width:80ch}
+.note b{color:var(--fg)}
+
+table{width:100%;border-collapse:collapse;background:var(--surface-2);
+  border:1px solid var(--line);border-radius:6px;overflow:hidden}
+th{text-align:left;font-size:11px;line-height:16px;font-weight:500;color:var(--fg-dim);
+  text-transform:uppercase;letter-spacing:.06em;padding:8px 12px;
+  border-bottom:1px solid var(--line);background:var(--surface-1)}
+td{padding:0 12px;height:32px;border-bottom:1px solid var(--line);font-size:13px}  /* R10 */
+tr:last-child td{border-bottom:0}
+tr:hover td{background:var(--surface-3)}                                  /* R15 */
+
+.sw{width:20px;height:20px;border-radius:4px;border:1px solid rgba(255,255,255,.10);
+  display:inline-block;vertical-align:-5px}
+.ratio{font-family:var(--font-mono);font-size:12px;line-height:18px}
+.pass{color:var(--status-good)} .fail{color:var(--status-fault)}
+.restricted{color:var(--status-warn)}
+
+/* ── Status chip · R32 · mark + 12% hue tint + hue text + mandatory label ── */
+.chip{display:inline-flex;align-items:center;gap:6px;border-radius:4px;   /* R9 */
+  padding:2px 8px;font-size:11px;line-height:16px;font-weight:500;
+  font-family:var(--font-ui);white-space:nowrap}
+.chip .lbl{letter-spacing:.04em}
+.qual{font-family:var(--font-mono);font-size:11px;opacity:1}  /* R25 mandatory qualifier */
+
+/* ── Flag chip · R50a · achromatic, lowercase mono, NO mark ─────────────── */
+.flag{display:inline-flex;align-items:center;border-radius:4px;padding:2px 8px;
+  background:var(--surface-3);color:var(--fg-muted);
+  font-family:var(--font-mono);font-size:11px;line-height:16px;text-transform:lowercase}
+
+.row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.stack{display:flex;flex-direction:column;gap:12px}
+.card{background:var(--surface-2);border:1px solid var(--line);border-radius:6px;
+  padding:16px;box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}          /* R14 */
+
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:900px){.grid2{grid-template-columns:1fr}}
+
+.desat{filter:grayscale(1)}
+.toggle{display:inline-flex;align-items:center;gap:8px;cursor:pointer;
+  background:var(--surface-2);border:1px solid var(--line-strong);border-radius:6px;
+  padding:6px 12px;color:var(--fg);font:inherit;font-size:12px}
+.toggle[aria-pressed=true]{background:var(--accent-wash);border-color:var(--accent);
+  color:var(--accent)}
+.toolbar{display:flex;gap:8px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
+
+.famlabel{font-size:11px;line-height:16px;color:var(--fg-dim);text-transform:uppercase;
+  letter-spacing:.06em;margin-bottom:8px}
+
+/* R22 — the rotating half-disc is the ONLY rotating element in the product */
+@keyframes spin{to{transform:rotate(360deg)}}
+.spin{animation:spin 1.2s linear infinite;transform-origin:50% 50%}
+@media(prefers-reduced-motion:reduce){.spin{animation:none}}          /* R17 */
+
+.legend{display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:center;
+  font-size:13px;color:var(--fg-muted)}
+.legend b{color:var(--fg);font-weight:500}
+</style>
+</head>
+<body>
+<div style="background:#5A4128;color:#F2E8D8;padding:16px;font:600 15px/22px system-ui;border-bottom:2px solid #C9A227">⚠ STALE AS OF 2026-08-27 — this file renders the SUPERSEDED slate ramp. design-dashboard.md R2/R3 now carry the &ldquo;Armada Oak&rdquo; palette (--surface-0 #0E0A07 · --surface-2 #1F1610 · --fg #F2E8D8). Status hues, marks, geometry and motion are UNCHANGED, so every non-surface panel below is still accurate. Do not build tokens.css from this file until it is regenerated.</div>
+<div class="wrap">
+
+<div class="head">
+  <h1>Armada — locked token &amp; status reference</h1>
+  <p>
+    Renders <code>specs/dashboard/design-dashboard.md</code>, which is complete and locked at
+    202 requirements. <b>No design decision is made in this file.</b> Every value is transcribed
+    from a numbered requirement and cited. Where this file and the spec disagree, the spec is right.
+  </p>
+  <div class="warnbar">
+    <b>Fonts are not vendored here.</b> R6 specifies Inter and JetBrains Mono; this page falls back
+    to system faces, so type metrics do not match the real build. Use this page for <b>colour and
+    geometry</b> only — never to judge type.
+  </div>
+</div>
+
+<!-- ══ 1. SURFACES ══════════════════════════════════════════════════════ -->
+<section>
+  <div class="sechead"><h2>Surfaces and lines</h2><span class="req">R2</span></div>
+  <p class="note">
+    Elevation is expressed by <b>surface colour only</b>. Box-shadow never creates elevation between
+    page-level surfaces — it is reserved for overlays (R14) and the drawer's left edge (R38b).
+  </p>
+  <table>
+    <thead><tr><th style="width:40px"></th><th>Token</th><th>Hex</th><th>Use</th></tr></thead>
+    <tbody id="surfaceRows"></tbody>
+  </table>
+</section>
+
+<!-- ══ 2. CONTRAST ══════════════════════════════════════════════════════ -->
+<section>
+  <div class="sechead"><h2>Foreground contrast</h2><span class="req">R139 · R140</span></div>
+  <p class="note">
+    R139: every status hue must reach <b>≥ 4.5:1 against both <code>--surface-2</code> and
+    <code>--surface-3</code></b>. Ratios below are computed live from the token values on this page
+    by the WCAG 2.1 relative-luminance formula — not copied from the spec's informative table.
+    <code>--fg-dim</code> is <b>expected to fail</b> and is restricted by R140 to non-essential text
+    (<code>seq</code> numbers, relative timestamps, placeholder hints). It never carries status.
+  </p>
+  <table>
+    <thead><tr>
+      <th style="width:40px"></th><th>Token</th><th>Hex</th>
+      <th>on --surface-2</th><th>on --surface-3</th><th>R139</th>
+    </tr></thead>
+    <tbody id="contrastRows"></tbody>
+  </table>
+  <p class="note" id="contrastVerdict" style="margin-top:12px"></p>
+</section>
+
+<!-- ══ 3. MARKS ═════════════════════════════════════════════════════════ -->
+<section>
+  <div class="sechead"><h2>The six marks</h2><span class="req">R19 · R20 · R141</span></div>
+  <p class="note">
+    R20: marks are <b>SVG geometry, never font glyphs or Unicode text</b>, so they stay legible at
+    12px and survive desaturation. R19 defines the fill axis once, for every family:
+  </p>
+  <div class="card">
+    <div class="legend">
+      <span id="m1"></span><span><b>●</b> filled — a verdict exists</span>
+      <span id="m2"></span><span><b>○</b> hollow — stopped before a verdict could be reached</span>
+      <span id="m3"></span><span><b>◐</b> half — a verdict is pending <em style="color:var(--fg-dim)">(R22: the only rotating element in the product)</em></span>
+      <span id="m4"></span><span><b>○ slashed</b> — cancelled; resolves the greyscale collision with <code>budget_exhausted</code> (R142)</span>
+      <span id="m5"></span><span><b>▲</b> fault — carries no fill meaning</span>
+      <span id="m6"></span><span><b>✕ in square</b> — integrity fault; carries no fill meaning</span>
+      <span id="m7"></span><span><b>◌</b> connection unknown (R35b, R114) — a connection mark, not an outcome</span>
+    </div>
+  </div>
+</section>
+
+<!-- ══ 4. FAMILIES + DESATURATION TEST ══════════════════════════════════ -->
+<section>
+  <div class="sechead"><h2>Status families</h2><span class="req">R21 · R26 · R29 · R32</span></div>
+  <p class="note">
+    R32: a chip is <b>mark + 12% hue tint + hue text + a text label</b>. There is no filled-pill chip
+    and <b>no bare status dot anywhere in the product</b> (two exceptions: the minimap R51, and the
+    health strip R35a — both spatial indexes rather than labelled readouts).
+  </p>
+
+  <div class="toolbar">
+    <button class="toggle" id="desatBtn" aria-pressed="false">Desaturate — run the R142b test</button>
+    <span class="note" style="margin:0">
+      R141/142b asserts <b>per-family</b> distinguishability, not global uniqueness. Desaturate and
+      check each family separately: within a family, no two states may collapse.
+    </span>
+  </div>
+
+  <div class="grid2" id="familyGrid"></div>
+
+  <div class="card" style="margin-top:16px">
+    <div class="famlabel">Intentional cross-family identities — R142a, not defects</div>
+    <p class="note" style="margin:0">
+      <code>incomplete</code> (run outcome) and <code>rejected</code> (adapter) both render
+      <b>neutral ●</b>. <code>cancelled</code> (run outcome), <code>retired</code> (binding), and a
+      queued delegation all render <b>neutral ○</b>. In each case the pair means the same thing under
+      R31a, the states live in different tables with different labels, and reading one as the other
+      produces no wrong conclusion. A test asserting global uniqueness would fail on a property the
+      design deliberately wants.
+    </p>
+  </div>
+</section>
+
+<!-- ══ 5. QUALIFIERS ════════════════════════════════════════════════════ -->
+<section>
+  <div class="sechead"><h2>Mandatory qualifiers</h2><span class="req">R25 · R32a</span></div>
+  <p class="note">
+    <code>budget_exhausted</code> and <code>no_progress</code> share a hue <b>and</b> a mark. They are
+    separated by an inline qualifier naming the cause the runtime already records. The qualifier is
+    <b>not optional and is not a tooltip</b> — a shared pair is always resolved in text.
+  </p>
+  <div class="card"><div class="row" id="qualRow"></div></div>
+</section>
+
+<!-- ══ 6. CHIP vs FLAG ══════════════════════════════════════════════════ -->
+<section>
+  <div class="sechead"><h2>Status chip vs flag chip</h2><span class="req">R50a · R50b</span></div>
+  <p class="note">
+    A <b>flag chip is a separate achromatic class</b> and never uses a status hue. R50b: the
+    <code>tool_result</code> flag <code>cancelled</code> and the run outcome <code>CANCELLED</code>
+    are the same word naming two different concepts. Achromatic lowercase monospace without a mark
+    makes the flag unmistakable for the outcome chip.
+  </p>
+  <div class="card">
+    <div class="row" style="gap:24px">
+      <div>
+        <div class="famlabel">status chip — run outcome</div>
+        <div class="row" id="cmpChip"></div>
+      </div>
+      <div>
+        <div class="famlabel">flag chip — tool_result payload</div>
+        <div class="row" id="cmpFlag"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ 7. ACCENT ════════════════════════════════════════════════════════ -->
+<section>
+  <div class="sechead"><h2>Accent — a closed list</h2><span class="req">R4 · R5</span></div>
+  <p class="note">
+    R5: the accent appears on <b>exactly four elements and nowhere else</b>. R4:
+    <code>--accent</code> and <code>--status-live</code> are deliberately different blues carrying
+    different kinds of meaning — the accent signals <b>operator intent</b> (selected, focused,
+    primary), <code>--status-live</code> signals <b>machine activity</b>. Neither may be set equal
+    to the other.
+  </p>
+  <div class="card">
+    <div class="row" style="gap:24px;align-items:flex-start">
+      <div class="stack">
+        <div class="famlabel">1 · primary button</div>
+        <button style="background:var(--accent);color:#06101F;border:0;border-radius:6px;
+          padding:7px 14px;font:inherit;font-size:13px;font-weight:500;cursor:pointer">Start run</button>
+      </div>
+      <div class="stack">
+        <div class="famlabel">2 · focus ring</div>
+        <div style="width:150px;height:32px;border-radius:6px;background:var(--surface-1);
+          border:1px solid var(--line-strong);
+          box-shadow:0 0 0 2px rgba(76,141,255,.4), inset 0 0 0 1px var(--accent)"></div>
+      </div>
+      <div class="stack">
+        <div class="famlabel">3 · active nav item</div>
+        <div style="width:150px;height:32px;border-radius:6px;background:var(--accent-wash);
+          border-left:2px solid var(--accent);display:flex;align-items:center;padding-left:10px;
+          color:var(--fg);font-size:13px">Runs</div>
+      </div>
+      <div class="stack">
+        <div class="famlabel">4 · selected row edge</div>
+        <div style="width:150px;height:32px;background:var(--surface-4);
+          border-left:2px solid var(--accent)"></div>
+      </div>
+      <div class="stack">
+        <div class="famlabel">not accent — live</div>
+        <div class="row" id="liveVsAccent"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ 8. HEALTH STRIP ══════════════════════════════════════════════════ -->
+<section>
+  <div class="sechead"><h2>Service health strip</h2><span class="req">R35a–R35d</span></div>
+  <p class="note">
+    <b>Exactly three dots</b> — daemon, forge, models — at 8px with 8px gap. Three not five (R35c):
+    a <code>db</code> dot could only mirror <code>daemon</code>, and <code>sandbox</code> has no
+    persistent process. It reuses the locked marks, introduces none, and <b>raises no navigation
+    badge</b> (R35d). A <code>missing</code> ModelBinding remains the only status that escalates to
+    the rail (R30).
+  </p>
+  <div class="card">
+    <div class="row" style="gap:8px" id="healthStrip"></div>
+  </div>
+</section>
+
+</div>
+
+<script>
+/* ── WCAG 2.1 relative luminance + contrast ratio ───────────────────────── */
+const hex2rgb = h => { h=h.replace('#',''); return [0,2,4].map(i=>parseInt(h.slice(i,i+2),16)); };
+const lum = h => { const [r,g,b]=hex2rgb(h).map(v=>{v/=255; return v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4);});
+  return .2126*r + .7152*g + .0722*b; };
+const ratio = (a,b) => { const L1=lum(a),L2=lum(b); return (Math.max(L1,L2)+.05)/(Math.min(L1,L2)+.05); };
+const T = k => getComputedStyle(document.documentElement).getPropertyValue(k).trim();
+
+/* ── Marks · R20 · SVG geometry only ────────────────────────────────────── */
+function mark(kind, color, size=12){
+  const s=size, c=s/2, r=s/2-1, ns='http://www.w3.org/2000/svg';
+  const svg=`<svg width="${s}" height="${s}" viewBox="0 0 ${s} ${s}" fill="none" aria-hidden="true">`;
+  const stroke=1.5;
+  switch(kind){
+    case 'filled':  return svg+`<circle cx="${c}" cy="${c}" r="${r}" fill="${color}"/></svg>`;
+    case 'hollow':  return svg+`<circle cx="${c}" cy="${c}" r="${r-.25}" stroke="${color}" stroke-width="${stroke}"/></svg>`;
+    case 'half':    return svg+`<g class="spin" style="transform-origin:${c}px ${c}px">
+        <circle cx="${c}" cy="${c}" r="${r-.25}" stroke="${color}" stroke-width="${stroke}"/>
+        <path d="M ${c} ${c-r} A ${r} ${r} 0 0 1 ${c} ${c+r} Z" fill="${color}"/></g></svg>`;
+    case 'slashed': return svg+`<circle cx="${c}" cy="${c}" r="${r-.25}" stroke="${color}" stroke-width="${stroke}"/>
+        <line x1="${c-r*.72}" y1="${c+r*.72}" x2="${c+r*.72}" y2="${c-r*.72}" stroke="${color}" stroke-width="${stroke}"/></svg>`;
+    case 'triangle':return svg+`<path d="M ${c} 1 L ${s-1} ${s-1.5} L 1 ${s-1.5} Z" fill="${color}"/></svg>`;
+    case 'xsquare': return svg+`<rect x="1" y="1" width="${s-2}" height="${s-2}" rx="1.5" stroke="${color}" stroke-width="${stroke}"/>
+        <line x1="4" y1="4" x2="${s-4}" y2="${s-4}" stroke="${color}" stroke-width="${stroke}"/>
+        <line x1="${s-4}" y1="4" x2="4" y2="${s-4}" stroke="${color}" stroke-width="${stroke}"/></svg>`;
+    case 'dotted':  return svg+`<circle cx="${c}" cy="${c}" r="${r-.25}" stroke="${color}"
+        stroke-width="${stroke}" stroke-dasharray="2 2"/></svg>`;
+  }
+}
+const tint = (hex,a) => { const [r,g,b]=hex2rgb(hex); return `rgba(${r},${g},${b},${a})`; };
+
+/* R32 — chip = mark + 12% tint bg + hue text + mandatory label */
+function chip(label, kind, token, qualifier){
+  const hex = T(token);
+  return `<span class="chip" style="background:${tint(hex,.12)};color:${hex}">
+    ${mark(kind,hex)}<span class="lbl">${label}</span>${
+    qualifier?`<span class="qual"> · ${qualifier}</span>`:''}</span>`;
+}
+const flag = t => `<span class="flag">${t}</span>`;
+
+/* ── 1. Surfaces ────────────────────────────────────────────────────────── */
+const SURFACES=[
+  ['--surface-0','Application background'],['--surface-1','Page and panel background'],
+  ['--surface-2','Card, row group, table body'],['--surface-3','Row hover, editor gutter'],
+  ['--surface-4','Selected row, menu, popover body'],
+  ['--line','1px hairline'],['--line-strong','Section divider']];
+surfaceRows.innerHTML = SURFACES.map(([k,use])=>{
+  const hex=T(k);
+  return `<tr><td><span class="sw" style="background:${hex}"></span></td>
+    <td><code>${k}</code></td><td class="mono">${hex.toUpperCase()}</td>
+    <td style="color:var(--fg-muted)">${use}</td></tr>`;
+}).join('');
+
+/* ── 2. Contrast · R139 ─────────────────────────────────────────────────── */
+const FG=[['--status-live'],['--status-good'],['--status-warn'],['--status-pending'],
+  ['--status-fault'],['--fg'],['--fg-muted'],['--status-neutral'],['--accent'],['--fg-dim']];
+const s2=T('--surface-2'), s3=T('--surface-3');
+let allPass=true, failures=[];
+contrastRows.innerHTML = FG.map(([k])=>{
+  const hex=T(k), r2=ratio(hex,s2), r3=ratio(hex,s3);
+  const isDim = k==='--fg-dim';
+  const ok = r2>=4.5 && r3>=4.5;
+  if(!ok && !isDim){ allPass=false; failures.push(k); }
+  const cls = v => v>=4.5?'pass':'fail';
+  const verdict = isDim
+    ? `<span class="restricted">restricted · R140</span>`
+    : (ok?`<span class="pass">pass</span>`:`<span class="fail">FAIL</span>`);
+  return `<tr><td><span class="sw" style="background:${hex}"></span></td>
+    <td><code>${k}</code></td><td class="mono">${hex.toUpperCase()}</td>
+    <td class="ratio ${cls(r2)}">${r2.toFixed(2)}:1</td>
+    <td class="ratio ${cls(r3)}">${r3.toFixed(2)}:1</td>
+    <td>${verdict}</td></tr>`;
+}).join('');
+contrastVerdict.innerHTML = allPass
+  ? `<span class="pass"><b>R139 holds</b></span> — every status hue clears 4.5:1 on both
+     <code>--surface-2</code> and <code>--surface-3</code>, computed live from the token values above.
+     <code>--fg-dim</code> is below the floor by design and is restricted by R140.`
+  : `<span class="fail"><b>R139 VIOLATED</b></span> — ${failures.join(', ')} fall below 4.5:1.`;
+
+/* ── 3. Marks ───────────────────────────────────────────────────────────── */
+const MARKS=[['m1','filled','--status-good'],['m2','hollow','--status-warn'],
+  ['m3','half','--status-live'],['m4','slashed','--status-neutral'],
+  ['m5','triangle','--status-fault'],['m6','xsquare','--status-fault'],
+  ['m7','dotted','--fg-muted']];
+MARKS.forEach(([id,kind,tok])=>{ document.getElementById(id).innerHTML=mark(kind,T(tok),14); });
+
+/* ── 4. Families · R21, R26, R29, R35b ──────────────────────────────────── */
+const FAMILIES=[
+  ['Run outcome — R21', [
+    ['RUNNING','half','--status-live',null],
+    ['SUCCESS','filled','--status-good',null],
+    ['INCOMPLETE','filled','--status-neutral',null],
+    ['BUDGET','hollow','--status-warn','max_steps'],
+    ['NO PROGRESS','hollow','--status-warn','shell ×3'],
+    ['CANCELLED','slashed','--status-neutral',null],
+    ['FAILED','triangle','--status-fault',null]]],
+  ['Adapter status — R26', [
+    ['PENDING EVAL','half','--status-pending',null],
+    ['PROMOTED','filled','--status-good',null],
+    ['REJECTED','filled','--status-neutral',null]]],
+  ['ModelBinding status — R29', [
+    ['PROMOTED','filled','--status-good',null],
+    ['RETIRED','hollow','--status-neutral',null],
+    ['MISSING','xsquare','--status-fault',null]]],
+  ['Service health — R35b', [
+    ['REACHABLE','filled','--status-good',null],
+    ['UNREACHABLE','triangle','--status-fault',null],
+    ['UNKNOWN','dotted','--fg-muted',null]]]
+];
+familyGrid.innerHTML = FAMILIES.map(([name,states])=>`
+  <div class="card fam">
+    <div class="famlabel">${name}</div>
+    <div class="row">${states.map(([l,k,t,q])=>chip(l,k,t,q)).join('')}</div>
+  </div>`).join('');
+
+/* R29 — retired renders its binding tag struck through */
+familyGrid.insertAdjacentHTML('beforeend', `
+  <div class="card fam" style="grid-column:1/-1">
+    <div class="famlabel">R29 additional treatment — binding rows</div>
+    <div class="stack">
+      <div class="row">${chip('PROMOTED','filled','--status-good')}
+        <code>armada/qwen3-4b-instruct-base</code></div>
+      <div class="row">${chip('RETIRED','hollow','--status-neutral')}
+        <code style="text-decoration:line-through;color:var(--fg-muted)">armada/qwen3-1.7b-base</code></div>
+      <div class="row" style="border-left:2px solid var(--status-fault);padding-left:10px">
+        ${chip('MISSING','xsquare','--status-fault')}
+        <code>armada/qwen3-4b-instruct-frontend-v2</code>
+        <span style="color:var(--fg-muted)">— database reports promoted; armada-models does not serve it</span>
+      </div>
+    </div>
+  </div>`);
+
+/* ── 5. Qualifiers · R25 ────────────────────────────────────────────────── */
+qualRow.innerHTML =
+  chip('BUDGET','hollow','--status-warn','max_steps') +
+  chip('BUDGET','hollow','--status-warn','max_wall_clock_seconds') +
+  chip('NO PROGRESS','hollow','--status-warn','shell ×3') +
+  chip('BUDGET','hollow','--status-warn','tree_max_model_tokens');
+
+/* ── 6. Chip vs flag · R50a/R50b ────────────────────────────────────────── */
+cmpChip.innerHTML = chip('CANCELLED','slashed','--status-neutral');
+cmpFlag.innerHTML = flag('cancelled') + flag('truncated') + flag('timed_out') + flag('spill_failed');
+
+/* ── 7. accent vs status-live · R4 ──────────────────────────────────────── */
+liveVsAccent.innerHTML = `
+  <span class="row" style="gap:6px"><span class="sw" style="background:var(--accent)"></span>
+    <code style="font-size:11px">--accent ${T('--accent').toUpperCase()}</code></span>
+  <span class="row" style="gap:6px"><span class="sw" style="background:var(--status-live)"></span>
+    <code style="font-size:11px">--status-live ${T('--status-live').toUpperCase()}</code></span>`;
+
+/* ── 8. Health strip · R35a — 8px dots, 8px gap, bare by exception ─────── */
+healthStrip.innerHTML = [['daemon','filled','--status-good'],
+  ['forge','triangle','--status-fault'],['models','dotted','--fg-muted']]
+  .map(([n,k,t])=>`<span class="row" style="gap:6px">${mark(k,T(t),8)}
+    <span style="font-size:11px;color:var(--fg-muted)">${n}</span></span>`).join('');
+
+/* ── Desaturation test · R141 / R142b ───────────────────────────────────── */
+desatBtn.addEventListener('click',()=>{
+  const on = desatBtn.getAttribute('aria-pressed')==='true';
+  desatBtn.setAttribute('aria-pressed', String(!on));
+  document.querySelectorAll('.fam').forEach(el=>el.classList.toggle('desat', !on));
+  desatBtn.textContent = !on ? 'Restore colour' : 'Desaturate — run the R142b test';
+});
+</script>
+</body>
+</html>

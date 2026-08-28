@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Armada — Playground B · Armada Oak</title>
+<!--
+  PLAYGROUND B — "Armada Oak". A PROPOSAL, not a locked artifact.
+
+  specs/dashboard/design-dashboard.md is LOCKED. This file proposes re-theming exactly
+  ONE layer of it: the surface + line + text ramp (R2, R3). Everything else is untouched —
+  the status hues (R21/26/29), the six marks (R19/20), the chip anatomy (R32), the accent's
+  closed use list (R5), motion (R12-R17), and every geometry rule stay exactly as ruled.
+
+  Nothing here ships until the spec is amended through a roundtable. See index.md.
+-->
+<style>
+/* ══ LOCKED — the current spec, for comparison ═════════════════════════════ */
+[data-theme="slate"]{
+  --surface-0:#0A0C10; --surface-1:#10131A; --surface-2:#161A23;
+  --surface-3:#1E232E; --surface-4:#272D3A;
+  --line:#232936; --line-strong:#323A4A;
+  --fg:#E6EAF2; --fg-muted:#9AA4B8; --fg-dim:#6B7488;
+}
+/* ══ PROPOSED — Armada Oak ════════════════════════════════════════════════
+   Tarred hull -> oak deck -> lit plank. Still a dark theme (R1: one theme, dark).
+   Text ramp is canvas/parchment rather than cool white.                      */
+[data-theme="oak"]{
+  --surface-0:#0E0A07;   /* tarred hull      */
+  --surface-1:#17110B;   /* dark oak         */
+  --surface-2:#1F1610;   /* oak plank        */
+  --surface-3:#2B2016;   /* lit plank, hover */
+  --surface-4:#38291C;   /* selected plank   */
+  --line:#33261B;        /* grain hairline   */
+  --line-strong:#5A4128; /* brass-warm seam  */
+  --fg:#F2E8D8;          /* canvas           */
+  --fg-muted:#B8A68C;    /* weathered rope   */
+  --fg-dim:#85735E;      /* restricted, R140 */
+}
+/* ══ UNCHANGED IN BOTH — every status hue and the accent ═══════════════════ */
+:root{
+  --accent:#4C8DFF; --accent-hover:#6FA4FF; --accent-wash:rgba(76,141,255,.12);
+  --status-live:#38BDF8; --status-good:#34D399; --status-neutral:#8B96AC;
+  --status-warn:#F2B33D; --status-fault:#F26D6D; --status-pending:#A78BFA;
+  --brass:#C9A227;  /* chrome only — never status, never the accent. See §5. */
+  --font-ui:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--surface-0);color:var(--fg);font-family:var(--font-ui);
+  font-size:13px;line-height:20px;-webkit-font-smoothing:antialiased;
+  transition:background-color .25s ease,color .25s ease}
+h1{font-size:24px;line-height:32px;font-weight:600;margin:0}
+h2{font-size:18px;line-height:26px;font-weight:600;margin:0}
+code,.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.wrap{max-width:1180px;margin:0 auto;padding:32px 24px 96px}
+
+.head{border-bottom:1px solid var(--line-strong);padding-bottom:16px;margin-bottom:24px}
+.head p{color:var(--fg-muted);margin:8px 0 0;max-width:74ch}
+.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:16px 0 32px;
+  position:sticky;top:0;z-index:20;background:var(--surface-0);padding:12px 0;
+  border-bottom:1px solid var(--line)}
+.btn{font:inherit;font-size:12px;padding:7px 14px;border-radius:6px;cursor:pointer;
+  background:var(--surface-2);color:var(--fg);border:1px solid var(--line-strong)}
+.btn[aria-pressed=true]{background:var(--accent-wash);border-color:var(--accent);color:var(--accent)}
+.hint{color:var(--fg-muted);font-size:12px}
+
+section{margin-bottom:48px;scroll-margin-top:70px}
+.sechead{display:flex;align-items:baseline;gap:12px;padding-bottom:8px;
+  border-bottom:1px solid var(--line);margin-bottom:16px}
+.req{font-family:var(--font-mono);font-size:11px;color:var(--accent);
+  border:1px solid var(--line-strong);border-radius:4px;padding:1px 6px}
+.note{color:var(--fg-muted);margin:0 0 16px;max-width:82ch}
+.note b{color:var(--fg)}
+.card{background:var(--surface-2);border:1px solid var(--line);border-radius:6px;
+  padding:16px;box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+  transition:background-color .25s ease,border-color .25s ease}
+.famlabel{font-size:11px;color:var(--fg-dim);text-transform:uppercase;
+  letter-spacing:.06em;margin-bottom:8px}
+.row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:900px){.grid2{grid-template-columns:1fr}}
+
+table{width:100%;border-collapse:collapse;background:var(--surface-2);
+  border:1px solid var(--line);border-radius:6px;overflow:hidden}
+th{text-align:left;font-size:11px;font-weight:500;color:var(--fg-dim);text-transform:uppercase;
+  letter-spacing:.06em;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--surface-1)}
+td{padding:0 12px;height:32px;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:var(--surface-3)}
+.sw{width:20px;height:20px;border-radius:4px;border:1px solid rgba(255,255,255,.10);
+  display:inline-block;vertical-align:-5px}
+.pass{color:var(--status-good)} .fail{color:var(--status-fault)} .restricted{color:var(--status-warn)}
+
+.chip{display:inline-flex;align-items:center;gap:6px;border-radius:4px;padding:2px 8px;
+  font-size:11px;line-height:16px;font-weight:500;white-space:nowrap}
+.flag{display:inline-flex;border-radius:4px;padding:2px 8px;background:var(--surface-3);
+  color:var(--fg-muted);font-family:var(--font-mono);font-size:11px;text-transform:lowercase}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spin{animation:spin 1.2s linear infinite}
+@media(prefers-reduced-motion:reduce){.spin{animation:none}}
+.desat{filter:grayscale(1)}
+
+/* ── component slice ──────────────────────────────────────────────────── */
+.app{display:grid;grid-template-columns:200px 1fr;border:1px solid var(--line);
+  border-radius:6px;overflow:hidden;background:var(--surface-1)}
+@media(max-width:760px){.app{grid-template-columns:1fr}}
+.rail{background:var(--surface-1);border-right:1px solid var(--line);padding:12px 0;
+  display:flex;flex-direction:column;min-height:420px}
+.nav{display:flex;align-items:center;height:32px;padding:0 12px;color:var(--fg-muted);
+  font-size:13px;border-left:2px solid transparent;cursor:pointer}
+.nav:hover{background:var(--surface-3);color:var(--fg)}
+.nav.on{background:var(--accent-wash);border-left-color:var(--accent);color:var(--fg)}
+.nav .badge{margin-left:auto;font-family:var(--font-mono);font-size:10px;
+  color:var(--status-fault);border:1px solid var(--status-fault);border-radius:4px;padding:0 4px}
+.health{margin-top:auto;padding:12px;display:flex;gap:8px;align-items:center;
+  border-top:1px solid var(--line)}
+.body{background:var(--surface-1);padding:16px;min-width:0}
+
+.runhead{background:var(--surface-2);border:1px solid var(--line);border-radius:6px;
+  padding:12px 16px;position:relative;overflow:hidden}
+/* R14 — live surfaces carry a status-tinted radial bloom, running only */
+.runhead.live::before{content:'';position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(120% 140% at 12% 0%,rgba(56,189,248,.10),transparent 60%)}
+.meter{height:3px;background:var(--surface-0);border-radius:2px;overflow:hidden;margin-top:6px}
+.meter i{display:block;height:100%;background:var(--status-live)}
+
+.stream{margin-top:12px;border:1px solid var(--line);border-radius:6px;
+  background:var(--surface-2);overflow:hidden}
+.stepbar{display:flex;gap:8px;align-items:center;padding:6px 12px;background:var(--surface-1);
+  border-bottom:1px solid var(--line);font-size:12px;color:var(--fg-muted)}
+.ev{display:grid;grid-template-columns:56px 1fr;align-items:start;min-height:28px;
+  border-bottom:1px solid var(--line)}
+.ev:last-child{border-bottom:0}
+.ev:hover{background:var(--surface-3)}
+.gut{display:flex;align-items:center;gap:6px;justify-content:flex-end;padding:5px 8px 0 0;
+  border-right:1px solid var(--line);font-family:var(--font-mono);font-size:11px;color:var(--fg-dim)}
+.evb{padding:5px 12px;min-width:0;font-size:13px}
+.evb .t{font-family:var(--font-mono);font-size:12px;color:var(--fg-muted)}
+/* R47 — inline error: hairline + mark only, NO tint, normal row height */
+.ev.err{border-left:2px solid var(--status-fault)}
+/* R48 — the ONLY tinted block in the stream; breaks the rail */
+.notice{padding:8px 12px;background:rgba(242,109,109,.08);
+  border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+  display:flex;gap:8px;align-items:flex-start;font-size:13px}
+.divider{display:flex;align-items:center;gap:8px;padding:4px 12px;color:var(--fg-dim);
+  font-family:var(--font-mono);font-size:11px}
+.divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--line)}
+</style>
+</head>
+<body data-theme="oak">
+<div class="wrap">
+
+<div class="head">
+  <h1>Playground B — “Armada Oak”</h1>
+  <p>
+    A <b>proposal</b>, not a locked artifact. It re-themes exactly one layer of
+    <code>design-dashboard.md</code>: the surface, line and text ramp (R2, R3). The status
+    hues, the six marks, chip anatomy, the accent's closed use list, motion and every geometry
+    rule are <b>untouched</b> — so the vocabulary you liked is bit-for-bit the same.
+  </p>
+</div>
+
+<div class="bar">
+  <button class="btn" id="tOak"   aria-pressed="true">Armada Oak</button>
+  <button class="btn" id="tSlate" aria-pressed="false">Locked slate</button>
+  <button class="btn" id="tDesat" aria-pressed="false">Desaturate (R142b)</button>
+  <span class="hint">Flip between them — the contrast table below recomputes live.</span>
+</div>
+
+<!-- ═══ 1. FEEL ═══════════════════════════════════════════════════════════ -->
+<section>
+  <div class="sechead"><h2>1 · The feel, in real components</h2><span class="req">R33–R48</span></div>
+  <div class="app">
+    <div class="rail">
+      <div class="nav">Corpora</div>
+      <div class="nav">Training</div>
+      <div class="nav">Models <span class="badge">1</span></div>
+      <div class="nav">Agents</div>
+      <div class="nav">Teams</div>
+      <div class="nav on">Runs</div>
+      <div class="health" id="health"></div>
+    </div>
+    <div class="body">
+      <div class="runhead live">
+        <div class="row" style="justify-content:space-between">
+          <div class="row" style="gap:8px">
+            <span id="runChip"></span>
+            <b style="font-size:15px">frontend-engineer</b>
+            <code style="color:var(--fg-muted);font-size:12px">v4</code>
+          </div>
+          <code style="color:var(--fg-dim);font-size:11px">armada/qwen3-4b-instruct-base</code>
+        </div>
+        <div class="row" style="gap:24px;margin-top:10px">
+          <div style="flex:1;min-width:120px">
+            <div class="row" style="justify-content:space-between;font-size:11px;color:var(--fg-dim)">
+              <span>steps</span><code>12 / 40</code></div>
+            <div class="meter"><i style="width:30%"></i></div>
+          </div>
+          <div style="flex:1;min-width:120px">
+            <div class="row" style="justify-content:space-between;font-size:11px;color:var(--fg-dim)">
+              <span>wall clock</span><code>23m 24s / 30m</code></div>
+            <div class="meter"><i style="width:78%;background:var(--status-warn)"></i></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="stream">
+        <div class="stepbar"><b style="color:var(--fg)">Step 3</b>
+          <span>· 4 tools · 1.8k tok · 12.4s</span></div>
+
+        <div class="ev"><div class="gut">7</div>
+          <div class="evb"><span class="t">→ armada/qwen3-4b-instruct-base · 4,318 tok</span></div></div>
+
+        <div class="ev"><div class="gut">8</div>
+          <div class="evb">Reading the provider and its call sites first.</div></div>
+
+        <div class="ev"><div class="gut">9</div>
+          <div class="evb"><span class="t">tool_call · read_file</span>
+            <code style="color:var(--fg-dim);font-size:11px"> {"path":"src/context/…"}</code></div></div>
+
+        <!-- R47: inline hairline = the agent was told no, loop continues -->
+        <div class="ev err"><div class="gut" id="gutErr">10</div>
+          <div class="evb"><span class="t">tool_result · error</span>
+            <span class="flag" style="margin-left:6px">timed_out</span></div></div>
+
+        <div class="divider">compacted 18 msgs · 31,204 → 4,180 tok</div>
+
+        <!-- R48: full-width tint = the harness broke. The only tinted block. -->
+        <div class="notice"><span id="noticeMark"></span>
+          <div><b>error</b> — <code>max_steps</code> snapshot 240 exceeds ceiling 200.
+          Clamped to 200; run proceeds.</div></div>
+      </div>
+    </div>
+  </div>
+  <p class="note" style="margin-top:12px">
+    R49, preserved: an <b>inline hairline</b> (seq 10) means the agent was told no and the loop
+    continues. A <b>full-width tinted notice</b> means the harness broke. On oak that distinction
+    reads more strongly, not less — the tint sits against a warm ground rather than a cool one.
+  </p>
+</section>
+
+<!-- ═══ 2. CONTRAST ═══════════════════════════════════════════════════════ -->
+<section>
+  <div class="sechead"><h2>2 · R139 on the active theme</h2><span class="req">R139 · R140</span></div>
+  <p class="note">
+    Computed live by the WCAG 2.1 formula against whichever theme is active. This is the gate a
+    surface change has to pass: <b>every status hue ≥ 4.5:1 on both <code>--surface-2</code> and
+    <code>--surface-3</code></b>. Flip the theme and watch the numbers move.
+  </p>
+  <table><thead><tr><th style="width:40px"></th><th>Token</th><th>Hex</th>
+    <th>on --surface-2</th><th>on --surface-3</th><th>R139</th></tr></thead>
+    <tbody id="cRows"></tbody></table>
+  <p class="note" id="cVerdict" style="margin-top:12px"></p>
+</section>
+
+<!-- ═══ 3. FAMILIES ═══════════════════════════════════════════════════════ -->
+<section>
+  <div class="sechead"><h2>3 · Status families — unchanged</h2><span class="req">R21 · R26 · R29</span></div>
+  <p class="note">Not one hue, mark or label is altered by this proposal. Desaturate to re-run
+    the per-family test (R142b) on the wood ground.</p>
+  <div class="grid2" id="fams"></div>
+</section>
+
+<!-- ═══ 4. BRASS ══════════════════════════════════════════════════════════ -->
+<section>
+  <div class="sechead"><h2>4 · Why the accent can’t be brass</h2><span class="req">R4</span></div>
+  <p class="note">
+    Brass is the obvious ship accent, and it is the one thing here I’d push back on. R4 chooses
+    blue <b>specifically so the accent can never be confused with a status hue</b>. Brass
+    <code>#C9A227</code> lands <b>7°</b> from <code>--status-warn</code> <code>#F2B33D</code>.
+    “This row is selected” and “the harness intervened” would become the same colour.
+  </p>
+  <div class="grid2">
+    <div class="card">
+      <div class="famlabel" style="color:var(--status-fault)">✕ brass as accent — collides</div>
+      <div class="row" style="gap:10px;margin-bottom:10px">
+        <span class="sw" style="background:#C9A227"></span><code style="font-size:11px">brass 46°</code>
+        <span class="sw" style="background:var(--status-warn)"></span><code style="font-size:11px">warn 39°</code>
+      </div>
+      <div style="height:32px;background:var(--surface-4);border-left:2px solid #C9A227;
+        display:flex;align-items:center;padding-left:10px;gap:8px">
+        <span>selected row</span>
+        <span class="chip" style="background:rgba(242,179,61,.12);color:var(--status-warn)"
+          id="brassClash"></span>
+      </div>
+      <p class="note" style="margin:10px 0 0;font-size:12px">Same colour, two meanings.</p>
+    </div>
+    <div class="card">
+      <div class="famlabel" style="color:var(--status-good)">✓ brass as chrome — legal</div>
+      <p class="note" style="margin:0 0 10px;font-size:12px">
+        R32b reserves status hues for status and puts chrome on the <code>--line</code> ramp.
+        So brass is fine in <b>seams and fittings</b> — it just can’t carry meaning. That is where
+        the ship reads from anyway.
+      </p>
+      <div style="border:1px solid var(--line);border-top:2px solid var(--brass);border-radius:6px;
+        padding:12px;background:var(--surface-1)">
+        <div class="famlabel" style="margin:0">brass seam · <code>--line-strong #5A4128</code></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<script>
+const hex2rgb=h=>{h=h.replace('#','');return [0,2,4].map(i=>parseInt(h.slice(i,i+2),16));};
+const lum=h=>{const[r,g,b]=hex2rgb(h).map(v=>{v/=255;return v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4);});
+  return .2126*r+.7152*g+.0722*b;};
+const ratio=(a,b)=>{const L1=lum(a),L2=lum(b);return (Math.max(L1,L2)+.05)/(Math.min(L1,L2)+.05);};
+const T=k=>getComputedStyle(document.body).getPropertyValue(k).trim();
+const tint=(h,a)=>{const[r,g,b]=hex2rgb(h);return `rgba(${r},${g},${b},${a})`;};
+
+function mark(kind,color,s=12){
+  const c=s/2,r=s/2-1,w=1.5,o=`<svg width="${s}" height="${s}" viewBox="0 0 ${s} ${s}" fill="none">`;
+  switch(kind){
+    case'filled':return o+`<circle cx="${c}" cy="${c}" r="${r}" fill="${color}"/></svg>`;
+    case'hollow':return o+`<circle cx="${c}" cy="${c}" r="${r-.25}" stroke="${color}" stroke-width="${w}"/></svg>`;
+    case'half':return o+`<g class="spin" style="transform-origin:${c}px ${c}px">
+      <circle cx="${c}" cy="${c}" r="${r-.25}" stroke="${color}" stroke-width="${w}"/>
+      <path d="M ${c} ${c-r} A ${r} ${r} 0 0 1 ${c} ${c+r} Z" fill="${color}"/></g></svg>`;
+    case'slashed':return o+`<circle cx="${c}" cy="${c}" r="${r-.25}" stroke="${color}" stroke-width="${w}"/>
+      <line x1="${c-r*.72}" y1="${c+r*.72}" x2="${c+r*.72}" y2="${c-r*.72}" stroke="${color}" stroke-width="${w}"/></svg>`;
+    case'triangle':return o+`<path d="M ${c} 1 L ${s-1} ${s-1.5} L 1 ${s-1.5} Z" fill="${color}"/></svg>`;
+    case'xsquare':return o+`<rect x="1" y="1" width="${s-2}" height="${s-2}" rx="1.5" stroke="${color}" stroke-width="${w}"/>
+      <line x1="4" y1="4" x2="${s-4}" y2="${s-4}" stroke="${color}" stroke-width="${w}"/>
+      <line x1="${s-4}" y1="4" x2="4" y2="${s-4}" stroke="${color}" stroke-width="${w}"/></svg>`;
+    case'dotted':return o+`<circle cx="${c}" cy="${c}" r="${r-.25}" stroke="${color}" stroke-width="${w}" stroke-dasharray="2 2"/></svg>`;
+  }
+}
+const chip=(l,k,t,q)=>{const h=T(t);return `<span class="chip" style="background:${tint(h,.12)};color:${h}">
+  ${mark(k,h)}<span>${l}</span>${q?`<span class="mono" style="font-size:11px"> · ${q}</span>`:''}</span>`;};
+
+const FAMS=[
+  ['Run outcome — R21',[['RUNNING','half','--status-live'],['SUCCESS','filled','--status-good'],
+    ['INCOMPLETE','filled','--status-neutral'],['BUDGET','hollow','--status-warn','max_steps'],
+    ['NO PROGRESS','hollow','--status-warn','shell ×3'],['CANCELLED','slashed','--status-neutral'],
+    ['FAILED','triangle','--status-fault']]],
+  ['Adapter — R26',[['PENDING EVAL','half','--status-pending'],['PROMOTED','filled','--status-good'],
+    ['REJECTED','filled','--status-neutral']]],
+  ['ModelBinding — R29',[['PROMOTED','filled','--status-good'],['RETIRED','hollow','--status-neutral'],
+    ['MISSING','xsquare','--status-fault']]],
+  ['Service health — R35b',[['REACHABLE','filled','--status-good'],['UNREACHABLE','triangle','--status-fault'],
+    ['UNKNOWN','dotted','--fg-muted']]]];
+
+const TOKENS=['--fg','--fg-muted','--fg-dim','--accent','--status-live','--status-good',
+  '--status-warn','--status-fault','--status-pending','--status-neutral'];
+
+function render(){
+  const s2=T('--surface-2'), s3=T('--surface-3');
+  let fails=[], tight=[];
+  cRows.innerHTML=TOKENS.map(k=>{
+    const hex=T(k), r2=ratio(hex,s2), r3=ratio(hex,s3), dim=k==='--fg-dim', ok=r2>=4.5&&r3>=4.5;
+    if(!ok&&!dim) fails.push(k);
+    if(!dim) tight.push([k,Math.min(r2,r3)]);
+    const cls=v=>v>=4.5?'pass':'fail';
+    return `<tr><td><span class="sw" style="background:${hex}"></span></td>
+      <td><code>${k}</code></td><td class="mono">${hex.toUpperCase()}</td>
+      <td class="mono ${cls(r2)}">${r2.toFixed(2)}:1</td>
+      <td class="mono ${cls(r3)}">${r3.toFixed(2)}:1</td>
+      <td>${dim?'<span class="restricted">restricted · R140</span>'
+        :(ok?'<span class="pass">pass</span>':'<span class="fail">FAIL</span>')}</td></tr>`;
+  }).join('');
+  tight.sort((a,b)=>a[1]-b[1]);
+  cVerdict.innerHTML = fails.length
+    ? `<span class="fail"><b>R139 VIOLATED</b></span> — ${fails.join(', ')} below 4.5:1.`
+    : `<span class="pass"><b>R139 holds</b></span> on this theme. Tightest margin:
+       <code>${tight[0][0]}</code> at <b>${tight[0][1].toFixed(2)}:1</b>
+       (${(tight[0][1]-4.5).toFixed(2)} of headroom).`;
+
+  fams.innerHTML=FAMS.map(([n,st])=>`<div class="card fam"><div class="famlabel">${n}</div>
+    <div class="row">${st.map(([l,k,t,q])=>chip(l,k,t,q)).join('')}</div></div>`).join('');
+  health.innerHTML=[['daemon','filled','--status-good'],['forge','triangle','--status-fault'],
+    ['models','dotted','--fg-muted']].map(([n,k,t])=>
+    `<span class="row" style="gap:5px">${mark(k,T(t),8)}
+     <span style="font-size:11px;color:var(--fg-muted)">${n}</span></span>`).join('');
+  runChip.innerHTML=chip('RUNNING','half','--status-live');
+  gutErr.innerHTML=`10 ${mark('triangle',T('--status-fault'),10)}`;
+  noticeMark.innerHTML=mark('triangle',T('--status-fault'),12);
+  brassClash.innerHTML=`${mark('hollow','#F2B33D')}<span>BUDGET</span>`;
+  if(tDesat.getAttribute('aria-pressed')==='true')
+    document.querySelectorAll('.fam').forEach(e=>e.classList.add('desat'));
+}
+function theme(t){
+  document.body.dataset.theme=t;
+  tOak.setAttribute('aria-pressed',String(t==='oak'));
+  tSlate.setAttribute('aria-pressed',String(t==='slate'));
+  render();
+}
+tOak.onclick=()=>theme('oak');
+tSlate.onclick=()=>theme('slate');
+tDesat.onclick=()=>{
+  const on=tDesat.getAttribute('aria-pressed')==='true';
+  tDesat.setAttribute('aria-pressed',String(!on));
+  document.querySelectorAll('.fam').forEach(e=>e.classList.toggle('desat',!on));
+};
+render();
+</script>
+</body>
+</html>
