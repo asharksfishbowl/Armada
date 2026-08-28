@@ -673,17 +673,33 @@ case "$ws_code" in
     *)           fail 'the same port serves /ws' '400, 426 or 101' "${ws_code:-<no response>}" ;;
 esac
 
-# Agents load from agents/ on startup once P4's file loader is wired into the daemon.
+# EVERY shipped Agent loads — expectation DERIVED FROM agents/, not hardcoded.
+#
+# This asserted the literal string `chef,frontend-engineer`. P8 added team-lead.yaml,
+# because R45 needs a manager plus two workers and R7 forbids the manager being a worker,
+# so the two existing Agents could not form a Team. The assertion then failed on a
+# correctly-loaded third Agent — it was pinning a SNAPSHOT of the directory rather than
+# the property that matters, which is that the loader loads everything in it.
+#
+# Deriving the list means adding an Agent cannot break this, while REMOVING one still
+# does. That is the right asymmetry: a file that stops loading is a defect, a file that
+# starts loading is the feature working.
+expected_agents="$(basename -s .yaml -a agents/*.yaml 2>/dev/null | sort | paste -sd, -)"
+
 agents_code="$(api_code "${DAEMON}/api/agents")"
-if [ "$agents_code" = "200" ]; then
-    agent_names="$(api "${DAEMON}/api/agents" | jq -r '[.[].name] | sort | join(",")' 2>/dev/null)"
-    if [ "$agent_names" = "chef,frontend-engineer" ]; then
-        pass 'both shipped example Agents loaded from agents/'
-    else
-        fail 'both shipped example Agents loaded' 'chef,frontend-engineer' "${agent_names:-<none>}"
-    fi
+if [ "$agents_code" != "200" ]; then
+    skip 'shipped Agents loaded' "GET /api/agents returned ${agents_code}"
+elif [ -z "$expected_agents" ]; then
+    # NOT a pass. With no fixture the comparison below is '' = '', which the empty set
+    # satisfies — the vacuous-pass shape this script has already been bitten by five times.
+    fail 'shipped Agents loaded' 'at least one agents/*.yaml to load' '<agents/ is empty>'
 else
-    skip 'shipped Agents loaded' "GET /api/agents returned ${agents_code} — routes wire up in P7"
+    agent_names="$(api "${DAEMON}/api/agents" | jq -r '[.[].name] | sort | join(",")' 2>/dev/null)"
+    if [ "$agent_names" = "$expected_agents" ]; then
+        pass "every shipped Agent loaded from agents/ (${expected_agents})"
+    else
+        fail 'every shipped Agent loaded from agents/' "$expected_agents" "${agent_names:-<none>}"
+    fi
 fi
 
 runs_code="$(api_code "${DAEMON}/api/runs")"
