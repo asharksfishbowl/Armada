@@ -79,6 +79,23 @@ export interface ChatRequest {
   maxTokens?: number;
 }
 
+/**
+ * D5 — EXACTLY TWO ADMISSION CLASSES. Runtime R21a, Team Orchestration R32.
+ *
+ * Declared here rather than in `models/scheduler.ts` so the agent loop can name a priority
+ * without importing a concrete scheduler. R15 forbids the loop importing an implementation,
+ * and a type import that happens to erase is still a dependency on the wrong file.
+ */
+export type ModelPriority = 'manager' | 'default';
+
+/** A scheduler slot — Runtime R20-R22. */
+export interface ModelAdmission {
+  /** R22 — recorded on the model_request Event and NEVER charged to wall clock. */
+  queuedMs: number;
+  /** Called when the request finishes, success or failure. */
+  release: () => void;
+}
+
 export interface ChatDelta {
   content?: string;
   toolCall?: Partial<ToolCall>;
@@ -116,6 +133,15 @@ export interface RunContext {
   mode: RunMode;
   sandbox?: Sandbox;
   corpusId?: string | null;
+  /**
+   * Team Orchestration R19 — the `event_id` of the `tool_call` Event that dispatched THIS
+   * invocation, and therefore the `delegation_id` a child Run is created with.
+   *
+   * Set per invocation rather than per Run: one Step may dispatch several tools
+   * concurrently, so a single shared field on the Run's context would hand every one of
+   * them the same id. The loop spreads a fresh object per call.
+   */
+  toolCallEventId?: string;
 }
 
 export interface Chunk {

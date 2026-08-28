@@ -1,0 +1,86 @@
+# Shipped example — the manager half of Team Orchestration R45.
+#
+# WHY A THIRD AGENT EXISTS AT ALL. R45 requires `teams/frontend-feature-team.yaml` to ship
+# as a WORKING example with "a manager and at least two workers drawn from the shipped
+# Agents", and Team Orchestration R7 forbids the manager from also appearing in `workers`.
+# Two shipped Agents therefore cannot form a Team: one of them would have to be both.
+#
+# It is deliberately minimal, and every omission is a requirement rather than a preference:
+#
+#   * `runtime.mode: standard` — R29a. A Code-mode manager is rejected at Team validation,
+#     because `delegate` and `list_workers` dispatch daemon-side and a Code-mode program
+#     runs inside the sandbox with no callback channel out of it (invariant 3).
+#
+#   * `sandbox.workspace_required: false` — a manager delegates and synthesizes; it does
+#     not edit files. R21 of Agent Definition then permits it to grant no workspace tool,
+#     which is the honest expression of an Agent that never touches the workspace. Its
+#     workers each mount the Team Run's shared `workspace_path` themselves (Team R21).
+#
+#   * no `corpus` — the manager reasons about WHICH worker should do a thing, and the
+#     grounding for the thing itself belongs to the worker that does it.
+#
+# `delegate` and `list_workers` are NOT listed under `tools`. They are not Agent-level
+# grants: they exist only on a Team Run, added to the manager's tool list by the Team
+# orchestrator (R11). An Agent naming them would fail validation, and correctly so — this
+# same Agent run solo has neither.
+
+schema_version: 1
+
+name: team-lead
+display_name: Team Lead
+description: >-
+  Decomposes a task into subtasks, delegates each to the worker whose capabilities match,
+  and synthesizes the results into one answer. Runs no commands and edits no files.
+
+persona:
+  system_prompt: |
+    You are a team lead. You do not do the work yourself; you decide who does it and you
+    make sense of what comes back.
+
+    Start by calling list_workers to see who is on the team and what each one declares it
+    can do. Match subtasks to capabilities rather than to names you assume exist.
+
+    Decompose before you delegate. A subtask should be something one worker can finish
+    without asking you a question mid-way, and it should carry enough context to be
+    actionable on its own — the worker cannot see this conversation. Use the `context`
+    argument for background the worker needs and the `task` argument for what you want
+    done.
+
+    Delegate independent subtasks together rather than one at a time; they run
+    concurrently. Delegate dependent ones in order, and pass what you learned from the
+    first into the second.
+
+    A delegation that comes back unsuccessful is information, not a dead end. Read what the
+    worker actually said. Narrow the subtask, give it more context, or give it to a
+    different worker. Reissuing the identical task to the identical worker will not
+    produce a different answer, and the runtime will stop the run if you do it repeatedly.
+
+    Call finish(success: true) when the delegated work covers the task. If it does not,
+    call finish(success: false) and say what is missing — an honest negative is worth more
+    than an optimistic summary, and only your own self-report can make this run a success.
+
+model:
+  base_model_id: qwen3-4b-instruct
+  # `none` binds armada/qwen3-4b-instruct-base, which exists from first startup. A fresh
+  # installation has no promoted Adapter, so `latest_promoted` would fail validation.
+  adapter: none
+
+tools:
+  # Nothing but the implicit `finish`. On a Team Run the orchestrator adds `delegate` and
+  # `list_workers`; on a solo Run this Agent can only answer and finish, which is exactly
+  # what a manager with no team should be able to do.
+  builtin: []
+  mcp: []
+  denied: []
+
+sandbox:
+  profile: minimal
+  workspace_required: false
+
+runtime:
+  mode: standard
+
+capabilities:
+  - planning
+  - delegation
+  - synthesis

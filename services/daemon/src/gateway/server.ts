@@ -22,6 +22,8 @@ import { buildHealth, PeerProbe } from './routes/health.js';
 import { dispatchAgentRoute, type AgentRoutes } from './routes/agent-router.js';
 import { dispatchRunRoute } from './routes/run-router.js';
 import type { RunRoutes } from './routes/runs.js';
+import { dispatchTeamRoute } from './routes/team-router.js';
+import type { TeamRoutes } from './routes/teams.js';
 import { WsRouter } from './ws-router.js';
 
 export interface GatewayOptions {
@@ -43,6 +45,8 @@ export interface GatewayOptions {
   agentRoutes?: AgentRoutes;
   /** Optional for the same reason as agentRoutes — P3's tests build a bare gateway. */
   runRoutes?: RunRoutes;
+  /** Team Orchestration R39, R40. Optional for the same reason. */
+  teamRoutes?: TeamRoutes;
 }
 
 export interface Gateway {
@@ -94,7 +98,7 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
 }
 
 export function createGateway(options: GatewayOptions): Gateway {
-  const { port, version, pool, probe, agentRoutes, runRoutes } = options;
+  const { port, version, pool, probe, agentRoutes, runRoutes, teamRoutes } = options;
   const wsRouter = new WsRouter(options.kernel.get('EventSink'));
 
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
@@ -141,7 +145,7 @@ export function createGateway(options: GatewayOptions): Gateway {
 
     // Both surfaces share one body reader and one error mapping. Tried in turn; each
     // returns null for a path that is not its own, and the gateway owns the final 404.
-    if (agentRoutes || runRoutes) {
+    if (agentRoutes || runRoutes || teamRoutes) {
       // The body is read LAZILY, by the matched route. Reading it up front would consume
       // the stream for GET and DELETE too, and a matcher that has already decided the path
       // is not ours should not have drained the request to find out.
@@ -159,6 +163,10 @@ export function createGateway(options: GatewayOptions): Gateway {
         }
         if (runRoutes) {
           const hit = await dispatchRunRoute(runRoutes, method, path, url.searchParams, body);
+          if (hit !== null) return hit;
+        }
+        if (teamRoutes) {
+          const hit = await dispatchTeamRoute(teamRoutes, method, path, url.searchParams, body);
           if (hit !== null) return hit;
         }
         return null;

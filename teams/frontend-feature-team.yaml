@@ -1,0 +1,84 @@
+# Shipped example — Team Orchestration R45.
+#
+# Loads and validates on a FRESH INSTALLATION, for the same reason the shipped Agents do:
+# every member binds a base ModelBinding that exists from first startup, and a Team
+# resolves only against Agents, which live in this daemon's own database. Nothing here
+# needs forge to be reachable, a training run to have happened, or a Corpus to hold chunks.
+#
+# ── THE TWO WORKERS ARE FROM UNRELATED DOMAINS ON PURPOSE ────────────────────
+# `frontend-engineer` and `chef` are the two Agents Armada ships, and they are as far apart
+# as two Agents can be. That makes this file evidence rather than decoration, in exactly
+# the way chef.yaml is:
+#
+#   * R13's capability matching is DEMONSTRABLE rather than lucky. `delegate(worker:
+#     "react")` can only resolve to one of these two, and `delegate(worker: "cooking")` can
+#     only resolve to the other. Two similar workers would let a wrong match look right.
+#
+#   * A Team is no more software-specific than an Agent is. If a future change makes a
+#     roster of unrelated specialists awkward to express, that change has made Team
+#     Orchestration software-specific and is wrong.
+#
+# ── STARTING A RUN AGAINST THIS TEAM NEEDS A WORKSPACE ───────────────────────
+# Both workers declare `sandbox.workspace_required: true`, so edge 20 makes
+# `workspace_path` mandatory on POST /api/team-runs and Run start fails naming them if it
+# is omitted. R21 then bind-mounts that ONE host path into every child's sandbox, so the
+# workers see each other's writes; the manager is responsible for sequencing conflicting
+# work (edge 9), because Armada does not arbitrate a concurrent write.
+
+schema_version: 1
+
+name: frontend-feature-team
+display_name: Frontend Feature Team
+description: >-
+  A manager that decomposes a task and delegates each part to the specialist whose declared
+  capabilities match it, then synthesizes the results into one answer.
+
+manager:
+  # R29a — this Agent is `runtime.mode: standard`. A Code-mode manager is rejected at
+  # validation naming the delegate-tool constraint.
+  agent_name: team-lead
+  synthesis_prompt: |
+    Write the final answer now, from the delegation results above.
+
+    Attribute what came from where when it matters, and say plainly where a delegation
+    failed or came back incomplete rather than papering over it — a gap the reader can see
+    is worth more than a summary that hides one. Do not delegate further; there is nothing
+    left to delegate to.
+
+workers:
+  - agent_name: frontend-engineer
+    # R3 — the alias `delegate` matches first and exactly. Shorter than the Agent name so a
+    # manager can address it unambiguously without knowing the registry.
+    alias: frontend
+  - agent_name: chef
+    alias: chef
+
+limits:
+  # R27 / edge 15 — the 7th delegate call returns an error naming this limit and the
+  # manager proceeds to synthesis. It does NOT terminate the Team Run.
+  max_delegations: 6
+
+  # R33 — must not exceed `scheduling.max_concurrent_total` in config/models.yaml, which
+  # ships as 2. A higher value is rejected at save time naming both, because the excess
+  # delegations could never make progress concurrently on a CPU-only host.
+  max_concurrent_delegations: 2
+
+  # R25, R26 — accounted across this Run AND every child. When either trips, every
+  # in-flight child is cancelled and the Team Run terminates `budget_exhausted` naming the
+  # budget. Both sit well under the `tree_budget_ceilings` in config/runtime.yaml.
+  #
+  # R9c — `tree_max_model_tokens` must exceed what any single member can spend alone
+  # (200000, the shipped per-Run default), or the first delegation would exhaust the tree.
+  tree_max_wall_clock_seconds: 3600
+  tree_max_model_tokens: 600000
+
+  # R4, R22 — lowers each worker's per-Run budgets FOR THIS TEAM ONLY, over whatever the
+  # Agent itself declared. A Team may lower a budget and may never raise one past the
+  # ceiling in config/runtime.yaml (R9a, edge 25).
+  #
+  # frontend-engineer declares `max_steps: 60` for solo work; a subtask handed to it by a
+  # manager should be smaller than a whole task, and the tree budget is what actually bounds
+  # the Run, so a generous per-child step count buys nothing but a slower failure.
+  per_delegation_budgets:
+    max_steps: 25
+    max_model_tokens: 120000

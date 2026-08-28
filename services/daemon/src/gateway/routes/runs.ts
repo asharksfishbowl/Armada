@@ -25,6 +25,11 @@ function summarise(run: RunRow): Record<string, unknown> {
     // R3b — explicitly null for a Run that is not a delegation, rather than omitted. An
     // absent key and a null one read differently to a client deciding whether to indent.
     parent_run_id: run.parent_run_id,
+    // Team Orchestration R19, R24. The pair a client needs to reconstruct the tree: which
+    // Team Run this belongs to, and which `tool_call` Event created it. P10's TeamRunTree
+    // is drawn from exactly these two fields plus `is_team_run` on the root.
+    delegation_id: run.delegation_id,
+    is_team_run: run.is_team_run,
   };
 }
 
