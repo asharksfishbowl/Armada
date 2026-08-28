@@ -30,13 +30,27 @@ def test_decorator_stack_above_a_def_still_matches() -> None:
     """The quantifier was redundant, so removing it must not change what matches."""
     assert _TOP_LEVEL_DEF.search("@app.route('/x')\ndef handler():\n")
     assert _TOP_LEVEL_DEF.search("@a\n@b.c\n@d.e.f(1, 2)\nclass Thing:\n")
-    assert _TOP_LEVEL_DEF.search("@Override\npublic void run() {\n")
+    assert _TOP_LEVEL_DEF.search("@Override\npublic final class Thing {\n")
+    assert _TOP_LEVEL_DEF.search('@Entity\n@Table(name = "x")\npublic interface Repo {\n')
 
 
 def test_a_bare_decorator_is_not_a_definition() -> None:
     """Guards against 'fixing' the regex by loosening it until everything matches."""
     assert not _TOP_LEVEL_DEF.search("@decorator_with_no_definition_under_it\n")
     assert not _TOP_LEVEL_DEF.search("    def indented_is_a_method(self):\n")
+
+
+def test_a_java_method_signature_is_not_a_top_level_definition() -> None:
+    """`void` is not in the keyword list, so `public void run()` never matched — in
+    EITHER version of the pattern.
+
+    Pinned because the first draft of this file asserted the opposite and CI caught it.
+    The regex intentionally recognises declarations that open a scope worth keeping whole
+    (`class`, `interface`, `enum`, `def`, `func`…), not every method signature; a Java
+    method is kept with its enclosing class rather than split out on its own. Recording it
+    as a test means the next person to read this list learns it is deliberate.
+    """
+    assert not _TOP_LEVEL_DEF.search("@Override\npublic void run() {\n")
 
 
 def test_the_catastrophic_input_completes_promptly() -> None:
