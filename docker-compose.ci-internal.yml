@@ -1,0 +1,30 @@
+# Compose overlay that severs egress from every Armada service.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.ci-internal.yml up -d
+#
+# `internal: true` tells Docker to attach no gateway to the network. Containers on
+# it can reach each other and nothing else — no DNS to the outside, no route off
+# the host. It is a real network boundary, not an assertion about intent.
+#
+# WHY THIS EXISTS
+# Invariant 7 says a default installation contacts no paid endpoint. The acceptance
+# criterion for it is "with egress to external model providers blocked". On a
+# GitHub-hosted runner there is no sudo and no iptables, so a host firewall is not
+# available. This is the same test done with Docker's own networking instead.
+#
+# It also needs no knowledge of any provider's IP ranges, which a firewall rule
+# would — and which would rot the moment a provider changed them.
+#
+# ORDERING MATTERS. Bring the stack up ONCE normally so images are pulled and built,
+# then recreate with this overlay. build-plan Req 1 scopes the guarantee the same
+# way: "after container images are pulled, a default installation transfers zero
+# bytes from any model provider." Pulling an image is not the thing under test;
+# reaching a model provider at runtime is.
+#
+# The smoke model (qwen3:0.6b) is baked into the armada-models image, so the stack
+# is fully functional with no egress. That is the property being proven: if any
+# service needed to reach out on the default path, it would fail here — loudly.
+
+networks:
+  default:
+    internal: true

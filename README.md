@@ -1,5 +1,7 @@
 # Armada
 
+[![CI](https://github.com/asharksfishbowl/Armada/actions/workflows/ci.yml/badge.svg)](https://github.com/asharksfishbowl/Armada/actions/workflows/ci.yml)
+
 Self-hosted platform for producing domain-specialized small language models and pairing each one with a purpose-built, tool-using agent.
 
 Specialization arrives through two independent channels: a **retrieval corpus** carries domain *knowledge*, and an optional **LoRA adapter** carries domain *behavior*. Agents compose into **teams** where a manager delegates to specialist workers.

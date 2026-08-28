@@ -1,0 +1,169 @@
+name: CI
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The Docker host Armada does not otherwise have.
+#
+# Development happens in a container with no Docker daemon, no root, and no
+# sudo, so the five services could never be brought up together there. This
+# repo is public, so GitHub-hosted runners are free and unlimited, ship Docker
+# and Compose v2 preinstalled, and are CPU-only — which is Armada's target
+# hardware rather than a compromise.
+#
+# NO SECRETS. This workflow must never require one. Invariant 7 says the default
+# path contacts no paid endpoint; if CI ever needs a credential, that invariant
+# has been broken upstream and the fix belongs there, not here.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # The fast guard. Every push and every PR. No Docker, target under 2 minutes.
+  # ───────────────────────────────────────────────────────────────────────────
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: services/daemon/package-lock.json
+
+      # `tsc && node --test`. Node 22 ships the test runner, so there is no
+      # framework dependency to install or license.
+      - name: daemon — npm ci && npm test
+        working-directory: services/daemon
+        run: |
+          npm ci
+          npm test
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'          # matches services/forge/Dockerfile
+          cache: pip
+          cache-dependency-path: |
+            services/forge/requirements.txt
+            services/forge/requirements-dev.txt
+
+      # pytest.ini already registers the `integration` marker and sets
+      # --strict-markers, so this deselects stack-dependent tests without any
+      # further configuration.
+      - name: forge — pytest (unit only)
+        working-directory: services/forge
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+          pytest -m "not integration"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # The end-to-end guard. Merges to main, or on demand.
+  #
+  # Gated on `unit` deliberately: a red unit suite makes a 15-minute stack boot
+  # a waste of a runner.
+  # ───────────────────────────────────────────────────────────────────────────
+  smoke:
+    name: Smoke test (full stack)
+    needs: unit
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # ubuntu-latest has ~14 GB free. Our footprint is small — two pulled
+      # images, the rest built locally, and a ~0.5 GB baked smoke model — but
+      # reclaiming the preinstalled toolchains is cheap insurance against a
+      # failure that would look like a real defect rather than a full disk.
+      - name: Reclaim runner disk
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc || true
+          df -h / | tail -1
+
+      - name: Preflight
+        run: |
+          docker --version
+          docker compose version
+          jq --version
+
+      - name: Smoke test
+        run: ./scripts/smoke-test.sh
+
+      # ── Invariant 7, exercised rather than asserted ──────────────────────
+      # ISSUE #11 offered two options: infer from logs that no outbound call was
+      # attempted, or SKIP the check in CI. Both are weaker than the invariant
+      # deserves. This is a third: sever egress at the network layer and require
+      # the stack to work anyway.
+      #
+      # Images are already pulled and built by the step above, which is the same
+      # scoping build-plan Req 1 uses — "after container images are pulled". The
+      # overlay then recreates the stack on a network with no gateway, so any
+      # attempt to reach a model provider fails hard instead of being inferred.
+      - name: Zero-egress verification
+        run: |
+          docker compose down -v
+          docker compose -f docker-compose.yml -f docker-compose.ci-internal.yml up -d
+          echo "Stack is up on an internal network — no route off the host."
+
+          ok=0
+          for _ in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then ok=1; break; fi
+            sleep 2
+          done
+          [ "$ok" = 1 ] || { echo "::error::forge never became healthy with egress severed"; exit 1; }
+
+          # Registration must not require reaching any model provider.
+          n=$(curl -fsS http://localhost:8000/models/bindings | jq '[.[]|select(.status=="promoted")]|length')
+          echo "promoted bindings with no egress: $n"
+          [ "$n" = "5" ] || { echo "::error::expected 5 promoted bindings, got $n"; exit 1; }
+
+          # And the baked model must still answer, since it was never downloaded.
+          curl -fsS http://localhost:8000/models/bindings \
+            | jq -e '[.[]|select(.materialized==true)]|length == 1' >/dev/null \
+            || { echo "::error::baked smoke model is not materialized under zero egress"; exit 1; }
+
+          echo "Invariant 7 holds: the default path needs no egress."
+
+      # A red run with no logs is barely better than no CI.
+      #
+      # Collected here rather than globbed from the smoke script's own output:
+      # that script logs to mktemp paths, so any fixed glob would match nothing
+      # and upload an empty artifact that looks like "no logs were produced".
+      - name: Collect logs
+        if: failure()
+        run: |
+          mkdir -p /tmp/ci-logs
+          docker compose logs --no-color --timestamps > /tmp/ci-logs/compose.log 2>&1 || true
+          docker compose ps -a > /tmp/ci-logs/ps.txt 2>&1 || true
+          df -h / > /tmp/ci-logs/disk.txt 2>&1 || true
+          echo "collected:"; ls -la /tmp/ci-logs
+          echo "── last 100 lines ──"
+          tail -100 /tmp/ci-logs/compose.log || true
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compose-logs-${{ github.run_id }}
+          path: /tmp/ci-logs/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v || true
