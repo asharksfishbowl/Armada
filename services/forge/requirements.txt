@@ -5,10 +5,6 @@
 # The torch CPU wheel is selected explicitly in the Dockerfile via the CPU index URL;
 # installing the default wheel would pull ~2 GB of CUDA libraries that never execute.
 #
-# Phase 7 adds: transformers, peft, trl, datasets (LoRA SFT, plus in-process candidate
-# generation and perplexity per roadmap F1/F2), and llama.cpp's conversion tooling baked
-# into the image for GGUF export (F6).
-
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 psycopg[binary]==3.2.3
@@ -18,3 +14,27 @@ pyyaml==6.0.2
 # Ingestion
 sentence-transformers==3.3.1
 pypdf==5.1.0
+
+# ── Training and the evaluation gate (P11) ───────────────────────────────────
+# LoRA SFT (R24) and, per build-plan Requirement 31, the IN-PROCESS evaluation gate:
+# candidate generation and teacher-forced perplexity both run here rather than through
+# armada-models. Req 32 notes this adds no dependency beyond what LocalTrainingBackend
+# already needs — the same four packages serve both.
+#
+# ALL PERMISSIVE. transformers, peft, trl, and datasets are Apache-2.0; torch is BSD-3.
+# Nothing here is GPL or AGPL, which the licensing section of CLAUDE.md forbids outright.
+#
+# STILL CPU-ONLY. None of these requires a GPU to install or import. The torch CPU wheel is
+# selected explicitly in the Dockerfile via the CPU index URL, and every one of these
+# resolves against it rather than pulling a CUDA build of its own.
+transformers==4.48.0
+peft==0.14.0
+trl==0.13.0
+datasets==3.2.0
+
+# NOT INSTALLED HERE, AND DELIBERATELY: llama.cpp's `convert_hf_to_gguf.py` and
+# `llama-quantize`, which R31 uses on promotion to merge, convert, and quantize. They are
+# a C++ build rather than a wheel, so armada_forge/registry/export.py locates them through
+# ARMADA_GGUF_CONVERT and ARMADA_LLAMA_QUANTIZE and refuses promotion with a message naming
+# both variables when they are absent. The zero-cost default path is unaffected: a smoke
+# Adapter is rejected before evaluation (R33b) and never reaches export.

@@ -8,8 +8,18 @@
 # with no configuration change, but Compose must still GRANT the container a device. See
 # the commented `deploy.resources.reservations.devices` block in docker-compose.yml.
 #
-# PHASE 7 ADDS (F6): llama.cpp's convert_hf_to_gguf.py and llama-quantize for the
-# merge -> GGUF -> quantize export path. Merging a 4B model in fp16 needs ~8-16 GB RAM.
+# GGUF EXPORT TOOLING IS NOT IN THIS IMAGE (roadmap F6, deferred).
+#
+# R31's promotion path merges the adapter, converts to GGUF, and quantizes, which needs
+# llama.cpp's convert_hf_to_gguf.py and a built llama-quantize — a C++ build, not a wheel.
+# armada_forge/registry/export.py locates both through ARMADA_GGUF_CONVERT and
+# ARMADA_LLAMA_QUANTIZE and REFUSES promotion naming the missing one, rather than
+# registering an unconverted artifact.
+#
+# The zero-cost default path is unaffected. A smoke Adapter is rejected before evaluation
+# (R33b) and never reaches export, so nothing on the CPU-only path needs this. Bake the
+# toolchain in when a quality run becomes reachable — merging a 4B model in fp16 needs
+# ~8-16 GB RAM, which is a second reason it belongs on a host that has a GPU.
 
 FROM python:3.12-slim-bookworm
 

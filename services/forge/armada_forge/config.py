@@ -84,6 +84,12 @@ class ArmadaConfig:
     eval_config: dict[str, Any]
     seed_corpora: list[dict[str, Any]]
     code_extensions: list[str]
+    # P11. `models` carries the backend -> base_url map a `provider: local` teacher is
+    # resolved through (R16c); `training_remote` carries R25's provider settings; `rubric`
+    # is the judge's pass/fail text (R34b), empty in mechanical mode because it is not read.
+    models: dict[str, Any]
+    training_remote: dict[str, Any]
+    eval_rubric: str
 
 
 def _check_choice(
@@ -247,6 +253,97 @@ def _validate_teacher_and_eval(
             "Set provider to `local` (free, CPU-bound) or `remote` (incurs spend)."
         )
 
+    # R33 — `eval_fraction` reserves the held-out set. A value at or outside the open unit
+    # interval is degenerate in both directions: 0 reserves nothing and the gate has nothing
+    # to score, 1 reserves everything and the training file is emptied. Checked at STARTUP
+    # for the same reason as everything else in this file — the alternative is discovering
+    # it at the first split, after a dataset has already been built.
+    fraction = eval_config.get("eval_fraction", 0.1)
+    if not isinstance(fraction, (int, float)) or isinstance(fraction, bool) or not 0 < fraction < 1:
+        errors.append(
+            f"config/eval.yaml: `eval_fraction` is {fraction!r}; it must be strictly "
+            "between 0 and 1 — 0 reserves no held-out set for the gate to score, and 1 "
+            "leaves nothing to train on"
+        )
+
+
+def _validate_teacher_endpoint(
+    teacher: dict[str, Any],
+    models_config: dict[str, Any],
+    errors: list[str],
+) -> None:
+    """The teacher's endpoint is resolvable — checked only when the teacher is ENABLED.
+
+    Skipped while disabled on purpose: a default installation ships `provider: none` with a
+    placeholder `base_url`, and failing startup over a placeholder that is never read would
+    make the zero-spend default configuration refuse to boot.
+    """
+    if not teacher.get("enabled"):
+        return
+
+    endpoint = teacher.get("endpoint") or {}
+    provider = teacher.get("provider")
+
+    if provider == "local":
+        # R16c — resolved through config/models.yaml BY NAME. A backend name with no entry
+        # there would surface as a connection failure to an empty URL, deep inside a
+        # distillation run.
+        backend_name = endpoint.get("backend", "ollama")
+        backends = models_config.get("backends") or {}
+        if backend_name not in backends:
+            errors.append(
+                f"config/teacher.yaml has `provider: local` with `endpoint.backend: "
+                f"{backend_name}`, which is not a key under `backends` in "
+                f"config/models.yaml (found: {', '.join(sorted(backends)) or 'none'})"
+            )
+        if not endpoint.get("model"):
+            errors.append(
+                "config/teacher.yaml has `provider: local` but no `endpoint.model`; it must "
+                "name a config/base-models.yaml `id`"
+            )
+
+    if provider == "remote":
+        if not endpoint.get("base_url"):
+            errors.append(
+                "config/teacher.yaml has `provider: remote` but no `endpoint.base_url`"
+            )
+        # INVARIANT 8 — a variable NAME, never a value. The presence of the name is what is
+        # checked; the value is read from the environment at call time and never from here.
+        if not endpoint.get("api_key_env"):
+            errors.append(
+                "config/teacher.yaml has `provider: remote` but no `endpoint.api_key_env`. "
+                "That field names an ENVIRONMENT VARIABLE; never write a credential value "
+                "into a config file."
+            )
+
+
+def _validate_training_remote(raw: dict[str, Any], errors: list[str]) -> None:
+    """R25 — the remote provider's settings, checked only when a provider is configured.
+
+    `provider: none` is the shipped default and is not a fault: a CPU-only installation runs
+    LocalTrainingBackend and never reads this file.
+    """
+    if raw.get("provider", "none") == "none":
+        return
+
+    if not raw.get("endpoint"):
+        errors.append("config/training-remote.yaml names a provider but no `endpoint`")
+    if not raw.get("api_key_env"):
+        errors.append(
+            "config/training-remote.yaml names a provider but no `api_key_env`. That field "
+            "names an ENVIRONMENT VARIABLE (invariant 8); a credential value written here "
+            "would be committed to the repository."
+        )
+
+    runtime = raw.get("max_runtime_minutes")
+    if runtime is not None and (not isinstance(runtime, int) or isinstance(runtime, bool) or runtime < 1):
+        # Edge 10 cancels a run that exceeds this. A non-positive ceiling can never fire,
+        # which is the decorative-threshold failure again under a different key.
+        errors.append(
+            f"config/training-remote.yaml: `max_runtime_minutes` is {runtime!r}; it must be "
+            "an integer of at least 1, or edge 10's cancellation can never fire"
+        )
+
 
 def load_config(config_dir: Path = CONFIG_DIR) -> ArmadaConfig:
     """Load and validate every startup-critical config file.
@@ -260,12 +357,34 @@ def load_config(config_dir: Path = CONFIG_DIR) -> ArmadaConfig:
     eval_raw = _load_yaml(config_dir / "eval.yaml", errors)
     seed_raw = _load_yaml(config_dir / "seed-corpora.yaml", errors)
     extensions_raw = _load_yaml(config_dir / "code-extensions.yaml", errors)
+    models_raw = _load_yaml(config_dir / "models.yaml", errors)
+    training_remote_raw = _load_yaml(config_dir / "training-remote.yaml", errors)
 
     # Each of these runs only when its file parsed; a file that did not parse already
     # recorded an error, and the raise below is unconditional on any error at all.
     base_models = _validate_base_models(base_models_raw, errors) if base_models_raw else []
     if teacher_raw and eval_raw:
         _validate_teacher_and_eval(teacher_raw, eval_raw, errors)
+    if teacher_raw and models_raw is not None:
+        _validate_teacher_endpoint(teacher_raw, models_raw, errors)
+    if training_remote_raw is not None:
+        _validate_training_remote(training_remote_raw, errors)
+
+    # R34b — judge mode passes `config/eval-rubric.md` to the teacher. Required ONLY in
+    # judge mode: a mechanical gate never reads it, and demanding it always would fail a
+    # zero-cost installation over a file it has no use for.
+    rubric_path = config_dir / "eval-rubric.md"
+    rubric = ""
+    if eval_raw and eval_raw.get("mode") == "judge":
+        if not rubric_path.exists():
+            errors.append(
+                f"config/eval.yaml sets `mode: judge`, which grades every held-out sample "
+                f"against {rubric_path}, and that file is missing"
+            )
+        else:
+            rubric = rubric_path.read_text(encoding="utf-8")
+    elif rubric_path.exists():
+        rubric = rubric_path.read_text(encoding="utf-8")
 
     if errors:
         raise ConfigError(errors)
@@ -274,12 +393,16 @@ def load_config(config_dir: Path = CONFIG_DIR) -> ArmadaConfig:
     # that append an error. The assert narrows the types for the reader and the checker.
     assert teacher_raw is not None and eval_raw is not None
     assert seed_raw is not None and extensions_raw is not None
+    assert models_raw is not None and training_remote_raw is not None
     return ArmadaConfig(
         base_models=base_models,
         teacher=teacher_raw,
         eval_config=eval_raw,
         seed_corpora=seed_raw.get("corpora", []),
         code_extensions=extensions_raw.get("extensions", []),
+        models=models_raw,
+        training_remote=training_remote_raw,
+        eval_rubric=rubric,
     )
 
 

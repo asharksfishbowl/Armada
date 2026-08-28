@@ -58,6 +58,54 @@ def shortlist(entries: list[dict[str, Any]]) -> list[ShortlistEntry]:
     return [ShortlistEntry.from_config(entry) for entry in entries]
 
 
+@dataclass(frozen=True)
+class TrainingEntry:
+    """The same validated entry, in the shape TRAINING and the EVALUATION GATE need.
+
+    A SECOND VIEW RATHER THAN MORE FIELDS ON ShortlistEntry, because the two have different
+    complete sets and different consumers. `ShortlistEntry` answers "what does the daemon
+    need to address this binding" — serving_ref, context_window, tool_format, and the two
+    capacity thresholds. This answers "what does forge need to train and score this model"
+    — the HuggingFace repo the weights load from, the chat template a dataset renders with,
+    the LoRA targets, the quantization applied at export, and whether the entry may be
+    trained at all.
+
+    Widening ShortlistEntry to cover both would give materialization a `lora_target_modules`
+    it has no use for and give training a `min_disk_gb` it never checks, and every consumer
+    would carry fields it cannot interpret. Both are built from the SAME validated dict, so
+    they cannot describe different models.
+    """
+
+    id: str
+    hf_id: str
+    chat_template: str
+    quantization: str
+    trainable: bool
+    smoke_test: bool
+    lora_target_modules: tuple[str, ...]
+
+    @classmethod
+    def from_config(cls, raw: dict[str, Any]) -> "TrainingEntry":
+        # Every key here is in config.py's BASE_MODEL_REQUIRED_KEYS, so an entry missing one
+        # exits startup naming its `id` long before this runs. Indexed rather than `.get`
+        # for exactly that reason: a default here would resurrect the decorative-field
+        # failure this repo has now produced five times.
+        return cls(
+            id=raw["id"],
+            hf_id=raw["hf_id"],
+            chat_template=raw["chat_template"],
+            quantization=raw["quantization"],
+            trainable=bool(raw["trainable"]),
+            smoke_test=bool(raw.get("smoke_test", False)),
+            lora_target_modules=tuple(raw["lora_target_modules"]),
+        )
+
+
+def training_entries(entries: list[dict[str, Any]]) -> dict[str, TrainingEntry]:
+    """Validated shortlist entries keyed by `id`, in the training/eval view."""
+    return {entry["id"]: TrainingEntry.from_config(entry) for entry in entries}
+
+
 def smoke_entry(entries: list[ShortlistEntry]) -> ShortlistEntry | None:
     """R4g — the one baked into the armada-models image, materialized from first boot."""
     return next((entry for entry in entries if entry.smoke_test), None)
