@@ -34,6 +34,11 @@ FORGE="http://localhost:${FORGE_PORT}"
 DAEMON="http://localhost:${DAEMON_PORT}"
 
 SHORTLIST="config/base-models.yaml"
+
+# The compose defaults (docker-compose.yml). Hardcoding `-U armada` would break the
+# moment anyone overrides them, and would do so with a confusing "role does not exist".
+PG_USER="${POSTGRES_USER:-armada}"
+PG_DB="${POSTGRES_DB:-armada}"
 BOOT_TIMEOUT_SECONDS="${SMOKE_BOOT_TIMEOUT:-600}"
 
 PASS=0; FAIL=0; SKIP=0
@@ -111,6 +116,12 @@ if [ ! -f docker-compose.yml ]; then
     exit 2
 fi
 
+# One place that knows how to reach Postgres, so a credential override lands everywhere.
+psql_q() {
+    docker compose exec -T armada-db psql -U "$PG_USER" -d "$PG_DB" -tAc "$1" 2>/dev/null \
+        | tr -d ' \r'
+}
+
 api()      { curl -sS --max-time 30 "$@" 2>/dev/null; }
 api_code() { curl -sS --max-time 30 -o /dev/null -w '%{http_code}' "$@" 2>/dev/null; }
 
@@ -159,8 +170,7 @@ $forge_up  && pass 'armada-forge healthy'  || fail 'armada-forge healthy'  '200 
 $daemon_up && pass 'armada-daemon healthy' || fail 'armada-daemon healthy' '200 from /api/health' "$(api_code "${DAEMON}/api/health")"
 
 # All six migrations applied, in order. The table is `schema_migrations` (001_init.sql).
-applied="$(docker compose exec -T armada-db psql -U armada -d armada -tAc \
-    'SELECT count(*) FROM schema_migrations' 2>/dev/null | tr -d ' \r')"
+applied="$(psql_q 'SELECT count(*) FROM schema_migrations')"
 if [ "$applied" = "6" ]; then
     pass 'all six migrations applied'
 else
@@ -298,8 +308,28 @@ fi
 restore_shortlist
 
 # ── 6. BAD SHORTLIST ─────────────────────────────────────────────────────────
-section '6. Malformed shortlist fails startup (R3)'
+section '6. Malformed shortlist fails startup (R3, R1b)'
 
+# Restart forge and report whether it refused to start, and what it said. Shared by both
+# cases below; the EXISTING backup_shortlist/restore_shortlist machinery and its
+# EXIT/INT/TERM trap are reused rather than duplicated.
+restart_and_capture() {
+    docker compose restart armada-forge >/dev/null 2>&1
+    sleep 10
+    forge_state="$(docker compose ps --format '{{.Service}} {{.State}}' 2>/dev/null | awk '$1=="armada-forge"{print $2}')"
+    forge_logs="$(docker compose logs --tail 40 armada-forge 2>/dev/null)"
+}
+
+restore_and_wait_for_forge() {
+    restore_shortlist
+    docker compose restart armada-forge >/dev/null 2>&1
+    for _ in $(seq 1 60); do
+        [ "$(api_code "${FORGE}/health")" = "200" ] && break
+        sleep 2
+    done
+}
+
+# ── 6a. A missing required key ───────────────────────────────────────────────
 backup_shortlist
 # Remove a required key from the FIRST entry. Startup must then exit non-zero naming that
 # entry's id (R3). sed rather than python3: the daemon and forge images do not carry a
@@ -308,10 +338,7 @@ backup_shortlist
 sed -i.bak '0,/^ *min_ram_gb:/{/^ *min_ram_gb:/d}' "$SHORTLIST"
 rm -f "${SHORTLIST}.bak"
 
-docker compose restart armada-forge >/dev/null 2>&1
-sleep 10
-forge_state="$(docker compose ps --format '{{.Service}} {{.State}}' 2>/dev/null | awk '$1=="armada-forge"{print $2}')"
-forge_logs="$(docker compose logs --tail 40 armada-forge 2>/dev/null)"
+restart_and_capture
 
 if echo "$forge_logs" | grep -q 'min_ram_gb'; then
     pass 'startup names the missing key'
@@ -326,17 +353,47 @@ else
 fi
 
 if [ "$forge_state" != "running" ]; then
-    pass 'forge refuses to run on an invalid shortlist'
+    pass 'forge refuses to run with a missing required key'
 else
-    fail 'forge refuses to run on an invalid shortlist' 'not running' "$forge_state"
+    fail 'forge refuses to run with a missing required key' 'not running' "$forge_state"
 fi
 
-restore_shortlist
-docker compose restart armada-forge >/dev/null 2>&1
-for _ in $(seq 1 60); do
-    [ "$(api_code "${FORGE}/health")" = "200" ] && break
-    sleep 2
-done
+restore_and_wait_for_forge
+
+# ── 6b. An unrecognised backend (R1b) ────────────────────────────────────────
+# P2's acceptance criterion is "a shortlist entry with backend: colibri is rejected at
+# startup", and until now R1b had NO test anywhere. It guards the discriminator that
+# landed early specifically so a second inference backend would never need a migration —
+# a guard nothing exercised is a guard that has already stopped working.
+backup_shortlist
+sed -i.bak '0,/^ *backend: ollama/{s/^\( *backend:\) ollama/\1 colibri/}' "$SHORTLIST"
+rm -f "${SHORTLIST}.bak"
+
+restart_and_capture
+
+if echo "$forge_logs" | grep -q 'colibri'; then
+    pass 'startup names the unrecognised backend value (R1b)'
+else
+    fail 'startup names the unrecognised backend value (R1b)' 'logs mentioning colibri' \
+         "${forge_logs:-<no logs>}"
+fi
+
+# R3 — the message must name the FIELD too, or an operator with a large shortlist knows
+# only that something somewhere is wrong.
+if echo "$forge_logs" | grep -q 'backend'; then
+    pass 'the refusal names the offending field (R3)'
+else
+    fail 'the refusal names the offending field (R3)' 'logs mentioning backend' \
+         "${forge_logs:-<no logs>}"
+fi
+
+if [ "$forge_state" != "running" ]; then
+    pass 'forge refuses to run with backend: colibri (R1b)'
+else
+    fail 'forge refuses to run with backend: colibri (R1b)' 'not running' "$forge_state"
+fi
+
+restore_and_wait_for_forge
 
 # ── 7. INGESTION ─────────────────────────────────────────────────────────────
 section '7. Corpus ingestion'
@@ -370,9 +427,36 @@ MD
         done
 
         if [ "${chunks:-0}" -gt 0 ]; then
-            pass "ingestion produced ${chunks} chunk(s) with embeddings"
+            pass "ingestion produced ${chunks} chunk(s)"
         else
             fail 'ingestion produced chunks' '> 0' "${chunks:-0}"
+        fi
+
+        # The message above used to say "with embeddings" while checking only the row
+        # count. NULL embeddings, or the wrong width, passed and told the operator they
+        # were fine — a claim with nothing behind it, in the one place whose whole job is
+        # to be the thing that fails.
+        #
+        # BOTH assertions are needed and neither is redundant: the dimension query returns
+        # EMPTY when every embedding is NULL, so it passes vacuously on its own; and the
+        # null count passes at the wrong dimension.
+        null_embeddings="$(psql_q 'SELECT count(*) FROM chunks WHERE embedding IS NULL')"
+        if [ "${null_embeddings:-}" = "0" ]; then
+            pass 'every chunk carries a non-NULL embedding (R11)'
+        else
+            fail 'every chunk carries a non-NULL embedding (R11)' '0 NULL embeddings' \
+                 "${null_embeddings:-<query failed>}"
+        fi
+
+        # R12 — chunks.embedding is vector(384) and bge-small-en-v1.5 emits 384. A width
+        # mismatch would make query vectors and indexed vectors incomparable, which is the
+        # silent-skew failure the /embed contract exists to prevent.
+        dims="$(psql_q 'SELECT DISTINCT vector_dims(embedding) FROM chunks WHERE embedding IS NOT NULL')"
+        if [ "${dims:-}" = "384" ]; then
+            pass 'embeddings are 384-dimensional (R11, R12)'
+        else
+            fail 'embeddings are 384-dimensional (R11, R12)' '384' \
+                 "${dims:-<no non-NULL embedding to measure>}"
         fi
 
         # R14 — re-ingesting unchanged adds and removes zero. This is what makes
@@ -417,10 +501,24 @@ fi
 # request (R16b). Reaching a paid endpoint on the default path is the one thing
 # invariant 7 forbids outright.
 if [ -n "${corpus_id:-}" ] && [ "${corpus_id:-null}" != "null" ]; then
-    distil_code="$(api_code -X POST "${FORGE}/datasets" -H 'Content-Type: application/json' \
-        -d "{\"corpus_id\":\"${corpus_id}\",\"include_trajectories\":false,\"max_samples\":10}")"
+    distil_payload="{\"corpus_id\":\"${corpus_id}\",\"include_trajectories\":false,\"max_samples\":10}"
+    distil_code="$(api_code -X POST "${FORGE}/datasets" -H 'Content-Type: application/json' -d "$distil_payload")"
+    distil_body="$(api -X POST "${FORGE}/datasets" -H 'Content-Type: application/json' -d "$distil_payload")"
+
     case "$distil_code" in
-        400) pass 'corpus distillation refused with the teacher disabled (R16b)' ;;
+        400)
+            pass 'corpus distillation refused with the teacher disabled (R16b)'
+            # R16b requires the refusal to NAME the two teacher-free sources, so an
+            # operator learns how to PROCEED rather than only that they cannot. A bare 400
+            # satisfies the status code and fails the intent.
+            if echo "$distil_body" | grep -q 'supplied_file' \
+               && echo "$distil_body" | grep -q 'include_trajectories'; then
+                pass 'the refusal names both teacher-free sources (R16b)'
+            else
+                fail 'the refusal names both teacher-free sources (R16b)' \
+                     'body naming supplied_file AND include_trajectories' "${distil_body:-<empty>}"
+            fi
+            ;;
         404) skip 'corpus distillation refusal' 'POST /datasets lands in P11' ;;
         *)   fail 'corpus distillation refused' '400 (or 404 before P11)' "$distil_code" ;;
     esac
