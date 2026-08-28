@@ -392,7 +392,17 @@ restart_and_capture() {
         sleep 1
     done
 
-    forge_logs="$(docker compose logs --tail 40 armada-forge 2>/dev/null)"
+    # 200, not 40. A refusing container FLAPS under the restart policy, so what survives
+    # in \`docker logs\` is a tail spanning several crash cycles rather than one clean
+    # message. 40 lines was enough until a deeper call stack started emitting a traceback
+    # alongside the fault list, at which point the assertion read the traceback and
+    # reported \`observed: return await anext(self.gen)\` for a forge that had named the
+    # fault correctly two lines earlier.
+    #
+    # The traceback itself is fixed at its source (config.py exits without unwinding), so
+    # this is not what makes the assertion pass. It is headroom: a diagnostic capture
+    # sized to exactly today\'s output is one noisy startup away from lying again.
+    forge_logs="$(docker compose logs --tail 200 armada-forge 2>/dev/null)"
 }
 
 restore_and_wait_for_forge() {
