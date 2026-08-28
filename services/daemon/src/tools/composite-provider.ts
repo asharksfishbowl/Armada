@@ -50,7 +50,20 @@ export type GrantResolver = (ctx: RunContext) => Promise<string[]>;
 
 export interface CompositeToolProviderOptions {
   grantsFor: GrantResolver;
-  retrieval: RetrievalProvider;
+  /**
+   * A GETTER, not the provider itself.
+   *
+   * This provider and the RetrievalProvider are registered by the same `Kernel.register`
+   * call, so at the moment this factory runs the Kernel does not exist yet. Taking the
+   * resolved value here meant the factory resolved it eagerly and every boot died with
+   * "Kernel accessed before registration completed" — the daemon reported it correctly and
+   * exited non-zero (R14), and the smoke test caught it, but no unit test did: the suite
+   * constructs this class directly and never exercises the factory.
+   *
+   * A getter moves the lookup to first use, by which point registration has completed or
+   * the process has already exited.
+   */
+  retrieval: () => RetrievalProvider;
   searchOptions: SearchKnowledgeOptions;
 }
 
@@ -79,7 +92,7 @@ export class CompositeToolProvider implements ToolProvider {
     if (name === SEARCH_KNOWLEDGE) {
       if (!granted.includes(name)) return unknownTool(name, granted);
       const { result } = await invokeSearchKnowledge(
-        this.options.retrieval,
+        this.options.retrieval(),
         ctx.corpusId,
         args,
         this.options.searchOptions,

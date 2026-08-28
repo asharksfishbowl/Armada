@@ -28,7 +28,7 @@ const retrieval: RetrievalProvider = {
 function provider(granted: string[]) {
   return new CompositeToolProvider({
     grantsFor: async () => granted,
-    retrieval,
+    retrieval: () => retrieval,
     searchOptions: { searchMaxK: 10, defaultK: 4 },
   });
 }
@@ -39,6 +39,52 @@ const ctx = (over: Partial<RunContext> = {}): RunContext => ({
   mode: 'standard',
   corpusId: 'corpus-1',
   ...over,
+});
+
+describe('plugin construction order', () => {
+  test('the RetrievalProvider is NOT resolved at construction', () => {
+    // THE TEST THAT WAS MISSING. This provider and the RetrievalProvider are registered by
+    // the same `Kernel.register` call, so while a factory is running the Kernel does not
+    // exist. The first version resolved the dependency in the factory body and every boot
+    // died with "Kernel accessed before registration completed".
+    //
+    // The whole suite passed anyway — 187 tests — because they construct this class
+    // directly with a real provider and never exercise the factory. Only the smoke test
+    // found it. This pins the property those tests could not see.
+    let resolved = 0;
+    const provider = new CompositeToolProvider({
+      grantsFor: async () => ['shell'],
+      retrieval: () => {
+        resolved += 1;
+        return retrieval;
+      },
+      searchOptions: { searchMaxK: 10, defaultK: 4 },
+    });
+
+    assert.equal(resolved, 0, 'constructing must not resolve the RetrievalProvider');
+    assert.ok(provider);
+  });
+
+  test('and it is not resolved by listing tools either', async () => {
+    // list() runs on every Step. Resolving a plugin there would be wasteful, but more to
+    // the point it would reintroduce the ordering coupling by a different route.
+    let resolved = 0;
+    const provider = new CompositeToolProvider({
+      grantsFor: async () => ['shell', 'search_knowledge'],
+      retrieval: () => {
+        resolved += 1;
+        return retrieval;
+      },
+      searchOptions: { searchMaxK: 10, defaultK: 4 },
+    });
+
+    await provider.list(ctx());
+    assert.equal(resolved, 0, 'listing must not resolve the RetrievalProvider');
+
+    // Only an actual search does.
+    await provider.invoke('search_knowledge', { query: 'x' }, ctx());
+    assert.equal(resolved, 1);
+  });
 });
 
 describe('CompositeToolProvider.list', () => {
