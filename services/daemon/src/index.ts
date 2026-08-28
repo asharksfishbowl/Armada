@@ -45,6 +45,10 @@ import { AgentStore } from './agents/store.js';
 import { createContextProvider } from './agents/validation-context.js';
 import { loadAgentDirectory, formatOutcomes } from './agents/file-loader.js';
 import { OpenAICompatibleAdapter } from './models/openai-adapter.js';
+import { RunStore } from './runs/store.js';
+import { RunOrchestrator } from './runs/orchestrator.js';
+import { createRunRoutes } from './gateway/routes/runs.js';
+import type { LiveBinding } from './models/binding-verifier.js';
 import { CompositeToolProvider } from './tools/composite-provider.js';
 import type { ResolvedSnapshot } from './agents/resolver.js';
 
@@ -291,7 +295,50 @@ try {
   );
 }
 
-const gateway = createGateway({ port: PORT, version: VERSION, pool, probe, kernel, agentRoutes });
+/**
+ * The Run surface — R2, R3, R3b, R4. The last of P7.
+ *
+ * Mounted in the SAME statement that creates it, and covered by a smoke assertion, because
+ * this repo has now shipped five components that were written, tested, and never called.
+ */
+const runOrchestrator = new RunOrchestrator(
+  {
+    model: kernel.get('ModelAdapter'),
+    tools: kernel.get('ToolProvider'),
+    events: kernel.get('EventSink'),
+    retrieval: kernel.get('RetrievalProvider'),
+    sandbox: kernel.get('SandboxProvider'),
+  },
+  agentStore,
+  new RunStore(pool),
+  {
+    reservedOutputTokens: Number(
+      (runtimeConfig['context'] as { reserved_output_tokens?: number } | undefined)
+        ?.reserved_output_tokens ?? 2048,
+    ),
+    noProgressThreshold: Number(runtimeConfig['no_progress_threshold'] ?? 3),
+    maxConcurrentTools: Number(runtimeConfig['max_concurrent_tools'] ?? 4),
+    // Read LIVE on every Run start (R17). Caching would let a retired binding keep
+    // starting Runs until the daemon restarted — the exact staleness R18 exists to catch.
+    fetchLiveBindings: async () => {
+      const res = await fetch(`${FORGE_URL}/models/bindings`);
+      if (!res.ok) throw new Error(`forge returned HTTP ${res.status}`);
+      return (await res.json()) as LiveBinding[];
+    },
+  },
+);
+
+const runRoutes = createRunRoutes(runOrchestrator, new RunStore(pool));
+
+const gateway = createGateway({
+  port: PORT,
+  version: VERSION,
+  pool,
+  probe,
+  kernel,
+  agentRoutes,
+  runRoutes,
+});
 
 /**
  * Compose sends SIGTERM on `docker compose down`. Close the listener, drop WebSocket

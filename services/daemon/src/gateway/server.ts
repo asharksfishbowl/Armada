@@ -20,6 +20,8 @@ import type { Pool } from 'pg';
 import type { Kernel } from '../kernel/kernel.js';
 import { buildHealth, PeerProbe } from './routes/health.js';
 import { dispatchAgentRoute, type AgentRoutes } from './routes/agent-router.js';
+import { dispatchRunRoute } from './routes/run-router.js';
+import type { RunRoutes } from './routes/runs.js';
 import { WsRouter } from './ws-router.js';
 
 export interface GatewayOptions {
@@ -39,6 +41,8 @@ export interface GatewayOptions {
    * 404 through all of P4, P5 and P6.
    */
   agentRoutes?: AgentRoutes;
+  /** Optional for the same reason as agentRoutes — P3's tests build a bare gateway. */
+  runRoutes?: RunRoutes;
 }
 
 export interface Gateway {
@@ -90,7 +94,7 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
 }
 
 export function createGateway(options: GatewayOptions): Gateway {
-  const { port, version, pool, probe, agentRoutes } = options;
+  const { port, version, pool, probe, agentRoutes, runRoutes } = options;
   const wsRouter = new WsRouter(options.kernel.get('EventSink'));
 
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
@@ -135,18 +139,30 @@ export function createGateway(options: GatewayOptions): Gateway {
       return;
     }
 
-    if (agentRoutes) {
+    // Both surfaces share one body reader and one error mapping. Tried in turn; each
+    // returns null for a path that is not its own, and the gateway owns the final 404.
+    if (agentRoutes || runRoutes) {
       // The body is read LAZILY, by the matched route. Reading it up front would consume
       // the stream for GET and DELETE too, and a matcher that has already decided the path
       // is not ours should not have drained the request to find out.
       const url = new URL(req.url ?? '', 'http://localhost');
-      void dispatchAgentRoute(
-        agentRoutes,
-        req.method ?? 'GET',
-        path,
-        url.searchParams,
-        () => readJsonBody(req),
-      )
+      const method = req.method ?? 'GET';
+      // Read at most ONCE across both dispatchers: the request stream cannot be consumed
+      // twice, so a second reader would see an empty body rather than an error.
+      let bodyPromise: Promise<unknown> | undefined;
+      const body = (): Promise<unknown> => (bodyPromise ??= readJsonBody(req));
+
+      void (async () => {
+        if (agentRoutes) {
+          const hit = await dispatchAgentRoute(agentRoutes, method, path, url.searchParams, body);
+          if (hit !== null) return hit;
+        }
+        if (runRoutes) {
+          const hit = await dispatchRunRoute(runRoutes, method, path, url.searchParams, body);
+          if (hit !== null) return hit;
+        }
+        return null;
+      })()
         .then((result) => {
           if (result === null) {
             sendJson(res, 404, { error: 'not_found', path });
