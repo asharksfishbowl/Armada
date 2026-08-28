@@ -19,9 +19,11 @@
  * corpus-less `search_knowledge` (R43) all produce an `is_error` result and the loop
  * continues. A model that guesses a tool name should lose a Step, not a trajectory.
  *
- * MCP tools (`{server}__{tool}`, R51) land in P12. Until then a granted MCP name simply is
- * not in the list, and calling one takes the R29 unknown-tool path — which names the tools
- * that ARE available, rather than pretending the call succeeded.
+ * MCP TOOLS (`{server}__{tool}`, R51) ARE THE THIRD SOURCE, AS OF P12. The pinned snapshot
+ * grants SERVERS — `{server}__*` — and the session behind `mcp` expands each into the tools
+ * that server actually offers. When no MCP source is configured, or a granted server did
+ * not connect, the name is absent from the list and calling it takes the R29 unknown-tool
+ * path, which names the tools that ARE available rather than pretending the call succeeded.
  */
 
 import type {
@@ -31,6 +33,7 @@ import type {
   ToolResult,
   ToolSpec,
 } from '../kernel/types.js';
+import { grantedMcpServers, isNamespacedToolName } from '../mcp/naming.js';
 import { builtinSpecsFor, dispatchBuiltin } from './registry.js';
 import {
   SEARCH_KNOWLEDGE,
@@ -47,6 +50,26 @@ import {
  * in the provider would be a second thing to keep in sync.
  */
 export type GrantResolver = (ctx: RunContext) => Promise<string[]>;
+
+/**
+ * The MCP half of the tool list — R51, R53. Implemented by `McpSessionManager`.
+ *
+ * An interface rather than the concrete class so this file stays free of transports, child
+ * processes and sockets, and so the merge logic can be tested without any of them.
+ *
+ * NEITHER METHOD MAY THROW. An unreachable server degrades the tool list (R53) and a failed
+ * call is an `is_error` result (edge 17); an exception from either would end the Run, which
+ * is the one outcome an MCP fault is never allowed to produce.
+ */
+export interface McpToolSource {
+  list(ctx: RunContext, grantedServers: string[]): Promise<ToolSpec[]>;
+  invoke(
+    ctx: RunContext,
+    name: string,
+    args: unknown,
+    grantedServers: string[],
+  ): Promise<ToolResult>;
+}
 
 export interface CompositeToolProviderOptions {
   grantsFor: GrantResolver;
@@ -65,6 +88,13 @@ export interface CompositeToolProviderOptions {
    */
   retrieval: () => RetrievalProvider;
   searchOptions: SearchKnowledgeOptions;
+  /**
+   * Optional because MCP is OPT-IN and ships disabled: `config/mcp-servers.yaml` declares
+   * no server, so a default installation needs no credential and makes no egress. Its
+   * absence is a working configuration, not a missing dependency — which is why a granted
+   * MCP name without it is an unknown tool and not a fault.
+   */
+  mcp?: McpToolSource;
 }
 
 export class CompositeToolProvider implements ToolProvider {
@@ -83,11 +113,30 @@ export class CompositeToolProvider implements ToolProvider {
       specs.push(searchKnowledgeSpec(this.options.searchOptions));
     }
 
+    // R51 — the granted servers' tools, namespaced. `grantedMcpServers` reads `{server}__*`
+    // entries out of the PINNED snapshot; it never consults config for which servers a Run
+    // may use (invariant 2).
+    const servers = grantedMcpServers(granted);
+    if (this.options.mcp && servers.length > 0) {
+      specs.push(...(await this.options.mcp.list(ctx, servers)));
+    }
+
     return specs;
   }
 
   async invoke(name: string, args: unknown, ctx: RunContext): Promise<ToolResult> {
     const granted = await this.options.grantsFor(ctx);
+
+    // R51 — only a namespaced name can reach MCP, and no built-in carries the `__`
+    // separator, so this branch cannot capture one. A namespaced name that no MCP source
+    // can serve falls through to R29 rather than being dispatched as a built-in.
+    if (isNamespacedToolName(name)) {
+      const servers = grantedMcpServers(granted);
+      if (this.options.mcp && servers.length > 0) {
+        return this.options.mcp.invoke(ctx, name, args, servers);
+      }
+      return unknownTool(name, granted);
+    }
 
     if (name === SEARCH_KNOWLEDGE) {
       if (!granted.includes(name)) return unknownTool(name, granted);

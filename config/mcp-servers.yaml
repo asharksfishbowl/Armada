@@ -5,6 +5,10 @@
 # Run start (R51), so two servers exposing the same tool name stay distinct. Two entries
 # sharing a `name` cause startup to fail naming the collision (edge 18).
 #
+# VALIDATED AT STARTUP, NEVER AT FIRST USE. Every fault in this file is collected and
+# reported in one non-zero exit — a bad entry surfaces when the daemon boots, not when a
+# Run first reaches for a server.
+#
 # CREDENTIALS — INVARIANT 8. `env_keys` lists environment variable NAMES only. Values are
 # read from the daemon's environment at Run start and are NEVER persisted to the database
 # and NEVER written into an Event: the event sink replaces any payload value sourced from
@@ -15,16 +19,41 @@
 # (invariant 7). Adding a server is a deliberate operator act.
 #
 # Note that a Code-mode Agent cannot use MCP tools at all (R27a) — there is no callback
-# channel out of the sandbox. Granting both is legal but produces a `mode_downgraded`
-# Event at Run start listing every excluded tool (R28a), and a save-time warning
-# (Agent Definition R16b).
+# channel out of the sandbox. A Code-mode Run opens no MCP session, connects to nothing,
+# and is offered no namespaced tool. Granting both is legal but produces a
+# `mode_downgraded` Event at Run start listing every excluded tool (R28a), and a save-time
+# warning (Agent Definition R16b).
+#
+# A SERVER THAT WILL NOT CONNECT DOES NOT FAIL THE RUN (R53). The daemon appends one
+# `mcp_unavailable` Event naming the server and the reason, and the Run continues without
+# that server's tools — the same degradation a retrieval fault produces, never a
+# termination.
 #
 # Entry shape (R50):
-#   name       string, unique
+#   name       string, unique, and may not contain `__` (it is the namespace separator)
 #   transport  one of stdio, http
-#   command    list of strings — stdio only
-#   url        string — http only
+#   command    list of strings — stdio only, argv already split. No shell is spawned.
+#   url        http:// or https:// string — http only
 #   env_keys   list of environment variable NAMES, never values
+#
+# How env_keys reaches a server:
+#   stdio  every named variable is placed in the CHILD's environment, and nothing else is.
+#          The daemon's own environment is NOT inherited — a third-party MCP server never
+#          sees DATABASE_URL or another server's credential. PATH, HOME, LANG and TMPDIR
+#          are passed through so the server can start at all.
+#   http   the one named variable is sent as `Authorization: Bearer <value>`, which is the
+#          mechanism the MCP authorization spec defines. An http server declaring more
+#          than one variable is refused at startup rather than having the extras silently
+#          ignored.
+#
+# A named variable that is unset in the daemon's environment makes that server
+# `mcp_unavailable` for the Run, naming the VARIABLE (never its value) — rather than
+# connecting anyway and failing later inside the server as an opaque auth error.
+
+# Ceiling on one JSON-RPC request to a server. Not a retry and not a delay: it is what
+# stops an unresponsive server from holding a Step open forever, since a Run's budgets are
+# checked BETWEEN Steps (R34) and cannot end a Step that never returns.
+request_timeout_seconds: 30
 
 servers: []
 
