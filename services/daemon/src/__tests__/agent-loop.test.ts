@@ -125,6 +125,12 @@ function input(over: Partial<Parameters<typeof runAgentLoop>[1]> = {}) {
     noProgressThreshold: 3,
     autoInjectK: 0,
     maxConcurrentTools: 4,
+    // R20-R22 — REQUIRED on AgentLoopInput, so this line is not a test convenience: it is
+    // the compile error that would fire if a caller ever routed a model request around the
+    // scheduler. These unit tests admit instantly and record zero queue time, which is
+    // exactly what an idle host does.
+    admitModelRequest: async () => ({ queuedMs: 0, release: () => undefined }),
+    priority: 'default' as const,
     signal: new AbortController().signal,
     ...over,
   };

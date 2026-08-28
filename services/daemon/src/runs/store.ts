@@ -32,7 +32,12 @@ export interface RunRow {
   tool_calls_used: number;
   wall_clock_ms_used: number;
   queued_ms_total: number;
+  // Team Orchestration R19, R10. Declared nullable in 005 (Runtime R53c) so GET /api/runs
+  // was complete from Phase 4; 006 adds team_version_id's foreign key and nothing else.
   parent_run_id: string | null;
+  delegation_id: string | null;
+  is_team_run: boolean;
+  team_version_id: string | null;
   started_at: string;
   ended_at: string | null;
 }
@@ -50,20 +55,58 @@ export interface ListFilter {
 export class RunStore {
   constructor(private readonly pool: Pool) {}
 
+  /**
+   * Create a Run row.
+   *
+   * The four Team Orchestration columns default to the solo-Run shape, so `POST /api/runs`
+   * needs to know nothing about Teams. A child Run supplies `parentRunId` and
+   * `delegationId` (R19); the Team Run itself supplies `isTeamRun` and `teamVersionId`
+   * (data-flow step 3).
+   */
   async create(input: {
     agentVersionId: string;
     mode: RunMode;
     workspacePath: string | null;
+    parentRunId?: string | null;
+    delegationId?: string | null;
+    isTeamRun?: boolean;
+    teamVersionId?: string | null;
   }): Promise<RunRow> {
     const { rows } = await this.pool.query<RunRow>(
-      `INSERT INTO runs (agent_version_id, mode, workspace_path)
-       VALUES ($1, $2, $3)
+      `INSERT INTO runs (
+         agent_version_id, mode, workspace_path,
+         parent_run_id, delegation_id, is_team_run, team_version_id
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
-      [input.agentVersionId, input.mode, input.workspacePath],
+      [
+        input.agentVersionId,
+        input.mode,
+        input.workspacePath,
+        input.parentRunId ?? null,
+        input.delegationId ?? null,
+        input.isTeamRun ?? false,
+        input.teamVersionId ?? null,
+      ],
     );
     const row = rows[0];
     if (!row) throw new Error('run insert returned no row');
     return row;
+  }
+
+  /**
+   * Team R23, edge 7 — the Runs a Team Run must cancel before appending its own `run_end`.
+   *
+   * Read from the database rather than from an in-memory set: a daemon that restarted
+   * mid-Team-Run has no in-memory children, and edge 14 still requires every one of them
+   * to reach a terminal state.
+   */
+  async listRunningChildren(parentRunId: string): Promise<RunRow[]> {
+    const { rows } = await this.pool.query<RunRow>(
+      `SELECT * FROM runs WHERE parent_run_id = $1 AND status = 'running' ORDER BY started_at ASC`,
+      [parentRunId],
+    );
+    return rows;
   }
 
   async get(runId: string): Promise<RunRow | null> {

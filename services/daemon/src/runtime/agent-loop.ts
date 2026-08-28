@@ -31,16 +31,20 @@
 
 import type {
   ChatMessage,
+  Event,
   EventSink,
   ModelAdapter,
+  ModelAdmission,
+  ModelPriority,
   RetrievalProvider,
   RunContext,
+  RunOutcome,
   ToolCall,
   ToolProvider,
   ToolResult,
   ToolSpec,
 } from '../kernel/types.js';
-import { BudgetTracker, type Budgets } from './budgets.js';
+import { BudgetTracker, type BudgetCounters, type Budgets } from './budgets.js';
 import { NoProgressDetector } from './no-progress.js';
 import { buildContext, estimateTokens, type BuiltContext } from './context-builder.js';
 import { resolveOutcome, type RunResolution, type TerminationCause } from './outcome.js';
@@ -55,12 +59,45 @@ export interface AgentLoopPlugins {
   retrieval: RetrievalProvider;
 }
 
+/**
+ * What a finalizer may change about a terminated Run — Team Orchestration R36-R38.
+ *
+ * ── IT CAN DEMOTE AN OUTCOME AND IT CAN NEVER PROMOTE ONE ───────────────────
+ * INVARIANT 1. `success` is self-reported, and a finalizer is not the agent. `demoteTo`
+ * is typed to exclude `success` so a finalizer that tried to award it would not compile,
+ * and `runAgentLoop` throws on one that reaches it another way — a requirement enforced
+ * nowhere is decorative.
+ *
+ * Team R38 needs exactly this and nothing more: a Team Run whose manager self-reported
+ * success but whose synthesis Step failed is `failed` (edge 17); one whose tree budget
+ * blew is `budget_exhausted` (R26). Both are demotions of an outcome the loop already
+ * resolved.
+ */
+export interface RunFinalization {
+  /** Team R37 — replaces the Run's `result`, e.g. with the synthesis output. */
+  result?: string;
+  /** Merged into the `run_end` payload, e.g. Team R36's `synthesis_skipped`. */
+  runEnd?: Record<string, unknown>;
+  demoteTo?: Exclude<RunOutcome, 'success'>;
+}
+
+/**
+ * Runs AFTER the Turn terminates and BEFORE `run_end` is appended.
+ *
+ * The ordering is the contract, and it is what the P8 exit criterion is stated in terms
+ * of: cancelling in-flight children has to happen before the Team Run's `run_end`, so the
+ * cascade lives inside a finalizer rather than beside the call.
+ */
+export type RunFinalizer = (resolution: RunResolution) => Promise<RunFinalization>;
+
 export interface AgentLoopInput {
   ctx: RunContext;
   /** From the Agent's pinned resolved_snapshot. Never re-derived (invariant 2). */
   bindingTag: string;
   systemPrompt: string;
   userMessage: string;
+  /** Team R14 — the manager's `context` argument, when this Run is a delegation. */
+  contextBlock?: string;
   contextWindow: number;
   reservedOutputTokens: number;
   budgets: Budgets;
@@ -68,12 +105,37 @@ export interface AgentLoopInput {
   /** R39 — chunks auto-injected on the first Step of a Turn when a Corpus is bound. */
   autoInjectK: number;
   maxConcurrentTools: number;
+  /**
+   * R20-R22 / Team R31-R34 — acquire a model-server slot.
+   *
+   * REQUIRED, NOT OPTIONAL, AND THAT IS THE POINT. `ModelScheduler` was written and unit
+   * tested in P7 and then never called by anything; making this mandatory means a caller
+   * that forgets to route through it does not compile. An optional field with a
+   * pass-through default would have reproduced exactly the defect it is meant to prevent.
+   *
+   * A function rather than the scheduler itself, so R15 still holds: this file names no
+   * concrete implementation.
+   */
+  admitModelRequest: (tag: string, priority: ModelPriority) => Promise<ModelAdmission>;
+  /** D5 / Team R32 — `manager` outranks `default` for the same tag. */
+  priority: ModelPriority;
+  /** Team R25 — reported as it accrues so a tree accountant sees it before termination. */
+  onModelTokens?: (promptTokens: number, completionTokens: number) => void;
+  /** Team R35-R38 — the synthesis Step, between termination and `run_end`. */
+  finalize?: RunFinalizer;
   /** Cancels the Run (R23). Also bounds every model call. */
   signal: AbortSignal;
 }
 
 export interface AgentLoopResult extends RunResolution {
   steps: number;
+  /**
+   * Team R15 — `delegate`'s ToolResult carries the child's token and step counts, and R3
+   * has GET /api/runs/{id} report them. Returned rather than re-derived from the event
+   * stream: the tracker already knows, and a second count computed from Events could
+   * disagree with the one the budget was enforced against.
+   */
+  counters: BudgetCounters;
 }
 
 export async function runAgentLoop(
@@ -89,8 +151,10 @@ export async function runAgentLoop(
   let selfReport: { success: boolean; summary: string } | undefined;
   let steps = 0;
 
-  const append = (type: Parameters<EventSink['append']>[0]['type'], payload: Record<string, unknown>) =>
-    plugins.events.append({ runId: ctx.runId, type, payload });
+  const append = (
+    type: Parameters<EventSink['append']>[0]['type'],
+    payload: Record<string, unknown>,
+  ): Promise<Event> => plugins.events.append({ runId: ctx.runId, type, payload });
 
   await append('run_start', {
     agent_version_id: ctx.agentVersionId,
@@ -128,6 +192,7 @@ export async function runAgentLoop(
       const tools = await plugins.tools.list(ctx);
       const built = buildContext({
         systemPrompt: input.systemPrompt,
+        contextBlock: input.contextBlock ?? null,
         // Only the first Step of the Turn carries it (R39).
         retrievalBlock: steps === 0 ? retrievalBlock : null,
         summary: null,
@@ -201,7 +266,39 @@ export async function runAgentLoop(
     cause = { kind: 'fault', error: err instanceof Error ? err.message : String(err) };
   }
 
-  const resolution = resolveOutcome(cause ?? { kind: 'fault', error: 'loop exited with no cause' }, selfReport);
+  let resolution = resolveOutcome(
+    cause ?? { kind: 'fault', error: 'loop exited with no cause' },
+    selfReport,
+  );
+  let runEndExtra: Record<string, unknown> = {};
+
+  // Team R35-R38 — synthesis, and the cancellation cascade that must precede `run_end`.
+  if (input.finalize) {
+    let final: RunFinalization;
+    try {
+      final = await input.finalize(resolution);
+    } catch (err) {
+      // A finalizer that throws must not leave the Run without a `run_end` — invariant 6
+      // is about the Run terminating, not about the loop body succeeding.
+      final = {
+        demoteTo: 'failed',
+        runEnd: { finalizer_error: err instanceof Error ? err.message : String(err) },
+      };
+    }
+
+    if ((final.demoteTo as RunOutcome | undefined) === 'success') {
+      // Unreachable through the type, reachable from untyped JS. Invariant 1 is the most
+      // consequential rule in the runtime; it gets a guard, not a comment.
+      throw new Error('a run finalizer may never award `success`: it is self-reported (invariant 1)');
+    }
+
+    runEndExtra = final.runEnd ?? {};
+    resolution = {
+      ...resolution,
+      ...(final.demoteTo ? { outcome: final.demoteTo } : {}),
+      ...(final.result !== undefined ? { result: final.result } : {}),
+    };
+  }
 
   await append('run_end', {
     outcome: resolution.outcome,
@@ -210,9 +307,10 @@ export async function runAgentLoop(
     counters: budgets.snapshot(),
     ...(resolution.budgetHit ? { budget_hit: resolution.budgetHit } : {}),
     ...(resolution.error ? { error: resolution.error } : {}),
+    ...runEndExtra,
   });
 
-  return { ...resolution, steps };
+  return { ...resolution, steps, counters: budgets.snapshot() };
 }
 
 // ── One Step ─────────────────────────────────────────────────────────────────
@@ -226,15 +324,19 @@ async function runStep(
   input: AgentLoopInput,
   built: BuiltContext,
   tools: ToolSpec[],
-  append: (type: 'model_request' | 'model_response' | 'error', payload: Record<string, unknown>) => Promise<unknown>,
+  append: (type: 'model_request' | 'model_response' | 'error', payload: Record<string, unknown>) => Promise<Event>,
   budgets: BudgetTracker,
 ): Promise<StepResult> {
-  await append('model_request', {
-    binding_tag: input.bindingTag,
-    messages: built.messages.length,
-    prompt_tokens_estimated: built.promptTokens,
-    tools: tools.map((t) => t.name),
-  });
+  // R20-R22 — THE SLOT IS ACQUIRED BEFORE `model_request` IS APPENDED, not after.
+  //
+  // Edge 13 requires the Event itself to carry `queued_ms`, and a worker queued behind a
+  // manager on the same tag is the case that matters. Appending first and patching later
+  // is not available: events are append-only (invariant 5), so the number has to be known
+  // by the time the row is written.
+  const admission = await input.admitModelRequest(input.bindingTag, input.priority);
+  // R22 — recorded, then EXCLUDED from wall clock. A Run on a busy host must not fail for
+  // a reason that has nothing to do with the Run.
+  budgets.recordQueuedMs(admission.queuedMs);
 
   let content = '';
   const toolCalls: ToolCall[] = [];
@@ -242,6 +344,15 @@ async function runStep(
   let completionTokens = 0;
 
   try {
+    await append('model_request', {
+      binding_tag: input.bindingTag,
+      messages: built.messages.length,
+      prompt_tokens_estimated: built.promptTokens,
+      tools: tools.map((t) => t.name),
+      priority: input.priority,
+      queued_ms: admission.queuedMs,
+    });
+
     for await (const delta of plugins.model.chat(
       {
         tag: input.bindingTag,
@@ -266,11 +377,19 @@ async function runStep(
     const error = err instanceof Error ? err.message : String(err);
     await append('error', { phase: 'model_call', error });
     return { kind: 'fault', error };
+  } finally {
+    // A leaked slot stalls every subsequent request for this tag with no error to
+    // diagnose, so it is released on the throwing path too.
+    admission.release();
   }
 
   // R56 — counted from the request/response pair. Recorded even on a Step that produced
   // nothing useful, because the tokens were spent either way.
   budgets.recordModelTokens(promptTokens, completionTokens);
+  // Team R25 — the tree accountant learns of this Run's consumption HERE, as it accrues,
+  // rather than at termination. A child that only reported at the end could spend the
+  // whole tree budget in one delegation before anything noticed.
+  input.onModelTokens?.(promptTokens, completionTokens);
 
   await append('model_response', {
     content,
@@ -294,12 +413,47 @@ async function dispatchTools(
   ctx: RunContext,
   calls: ToolCall[],
   input: AgentLoopInput,
-  append: (type: 'tool_call' | 'tool_result', payload: Record<string, unknown>) => Promise<unknown>,
+  append: (type: 'tool_call' | 'tool_result', payload: Record<string, unknown>) => Promise<Event>,
   budgets: BudgetTracker,
 ): Promise<DispatchOutcome> {
   let budgetHit: string | undefined;
 
-  // Slots are filled by index and the EVENT STREAM IS WRITTEN AFTERWARDS, IN INDEX ORDER.
+  // ── PHASE 1: RESERVE, IN INDEX ORDER, ONE CALL AT A TIME ────────────────────
+  //
+  // The budget check, the counter increment and the `tool_call` Event all happen here, in
+  // a SEQUENTIAL loop — not inside the concurrent workers below.
+  //
+  // Two properties depend on that, and they used to be in tension:
+  //
+  //   * R34 — the budget is checked before EACH dispatch, and check-and-record must not
+  //     interleave. In the previous shape that meant no `await` could sit between them,
+  //     which is why the Event was appended afterwards. A sequential loop gets the same
+  //     mutual exclusion for free: there is only ever one reservation in flight.
+  //
+  //   * Team Orchestration R19 — a child Run's `delegation_id` IS the `event_id` of the
+  //     manager's `tool_call` Event. `delegate` therefore has to know that id while it
+  //     runs, and appending the Event after the tool returned made it unknowable. The id
+  //     is handed to the invocation through `ctx.toolCallEventId`.
+  //
+  // Every reserved call is dispatched, so `tool_call` and `tool_result` still pair
+  // exactly. A call the budget refuses is never reserved and never appended.
+  const reserved: { call: ToolCall; eventId: string }[] = [];
+  for (const call of calls) {
+    const check = budgets.canDispatchTool();
+    if (!check.ok) {
+      budgetHit ??= check.budget ?? 'unknown';
+      break;
+    }
+    budgets.recordToolCall();
+    const event = await append('tool_call', {
+      tool_call_id: call.id,
+      name: call.name,
+      arguments: call.arguments,
+    });
+    reserved.push({ call, eventId: event.eventId });
+  }
+
+  // ── PHASE 2: DISPATCH CONCURRENTLY, WRITE RESULTS IN INDEX ORDER ────────────
   //
   // Appending from inside a worker put tool_result events in COMPLETION order, so a Run
   // whose second tool finished first replayed in a different order than it ran. R24 —
@@ -308,67 +462,54 @@ async function dispatchTools(
   // invariant 5 makes it the observability surface and the trajectory training data. Two
   // orderings of the same Run is exactly what that forbids.
   //
-  // The cost is that a slow tool delays its siblings' events becoming visible. Ordering is
-  // worth more: P10's live inspection can render a correct stream slightly late, but it
+  // The cost is that a slow tool delays its siblings' results becoming visible. Ordering
+  // is worth more: P10's live inspection can render a correct stream slightly late, but it
   // cannot un-see a wrong one.
-  const slots = new Array<{ call: ToolCall; result: ToolResult } | undefined>(calls.length);
+  const slots = new Array<ToolResult | undefined>(reserved.length);
   let next = 0;
 
   const worker = async (): Promise<void> => {
     for (;;) {
       const index = next++;
-      if (index >= calls.length) return;
-      const call = calls[index];
-      if (!call) return;
+      if (index >= reserved.length) return;
+      const entry = reserved[index];
+      if (!entry) return;
 
-      // R34 — checked BEFORE each dispatch, not once per Step, so a Step emitting ten
-      // calls cannot spend ten past a ceiling of two.
-      //
-      // CHECK AND RECORD ARE ADJACENT AND SYNCHRONOUS, WITH NO await BETWEEN THEM. That
-      // adjacency IS the mutual exclusion: JavaScript will not interleave two workers
-      // inside a synchronous run. An `await append(...)` used to sit here, and every
-      // worker passed the check before any of them recorded — three tools dispatched
-      // against a ceiling of two. The budget was checked and still exceeded.
-      const check = budgets.canDispatchTool();
-      if (!check.ok) {
-        budgetHit ??= check.budget ?? 'unknown';
-        return;
-      }
-      budgets.recordToolCall();
-
-      let result: ToolResult;
       try {
-        result = await plugins.tools.invoke(call.name, call.arguments, ctx);
+        // A FRESH context object per call. The sandbox and the ids are shared by
+        // reference, but `toolCallEventId` is per-invocation — mutating one shared object
+        // would hand every concurrently dispatched tool the last writer's id.
+        slots[index] = await plugins.tools.invoke(entry.call.name, entry.call.arguments, {
+          ...ctx,
+          toolCallEventId: entry.eventId,
+        });
       } catch (err) {
         // R29/R30 — a tool that throws becomes an error RESULT. The loop continues; a
         // failing tool should cost a Step, not a trajectory.
-        result = {
-          content: `tool \`${call.name}\` failed: ${err instanceof Error ? err.message : String(err)}`,
+        slots[index] = {
+          content: `tool \`${entry.call.name}\` failed: ${err instanceof Error ? err.message : String(err)}`,
           isError: true,
         };
       }
-
-      slots[index] = { call, result };
     }
   };
 
-  const width = Math.max(1, Math.min(input.maxConcurrentTools, calls.length));
+  const width = Math.max(1, Math.min(input.maxConcurrentTools, Math.max(1, reserved.length)));
   await Promise.all(Array.from({ length: width }, () => worker()));
 
   const completed: { call: ToolCall; result: ToolResult }[] = [];
-  for (const entry of slots) {
-    if (!entry) continue;   // never dispatched — the budget stopped before this index
-    const { call, result } = entry;
-    await append('tool_call', { tool_call_id: call.id, name: call.name, arguments: call.arguments });
+  for (const [index, entry] of reserved.entries()) {
+    const result = slots[index];
+    if (!result) continue;
     await append('tool_result', {
-      tool_call_id: call.id,
-      name: call.name,
+      tool_call_id: entry.call.id,
+      name: entry.call.name,
       content: result.content,
       ...(result.isError ? { is_error: true } : {}),
       ...(result.truncated ? { truncated: true } : {}),
       ...(result.spillFailed ? { spill_failed: true } : {}),
     });
-    completed.push(entry);
+    completed.push({ call: entry.call, result });
   }
 
   return budgetHit === undefined ? { completed } : { completed, budgetHit };

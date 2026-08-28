@@ -28,6 +28,7 @@
 import type {
   EventSink,
   ModelAdapter,
+  ModelPriority,
   RetrievalProvider,
   RunContext,
   SandboxProvider,
@@ -36,7 +37,9 @@ import type {
 import type { AgentStore } from '../agents/store.js';
 import type { ResolvedSnapshot } from '../agents/resolver.js';
 import { forgeUnreachableError, verifyPinnedBinding, type LiveBinding } from '../models/binding-verifier.js';
-import { runAgentLoop } from '../runtime/agent-loop.js';
+import { runAgentLoop, type AgentLoopResult, type RunFinalizer } from '../runtime/agent-loop.js';
+import type { Budgets } from '../runtime/budgets.js';
+import type { ModelScheduler } from '../models/scheduler.js';
 import { RunStore } from './store.js';
 
 export class RunStartError extends Error {
@@ -57,6 +60,12 @@ export interface OrchestratorConfig {
   reservedOutputTokens: number;
   noProgressThreshold: number;
   maxConcurrentTools: number;
+  /**
+   * R20-R22, Team R31-R34. REQUIRED — omitting it is a compile error in index.ts, which is
+   * the only thing that would have caught `ModelScheduler` being written, unit tested and
+   * then called by nothing at all through the whole of P7.
+   */
+  scheduler: ModelScheduler;
   /** Read live so an operator restarting the daemon picks up a changed ceiling. */
   fetchLiveBindings: () => Promise<LiveBinding[]>;
 }
@@ -65,6 +74,42 @@ export interface StartRunInput {
   agentId: string;
   task: string;
   workspacePath?: string | null;
+}
+
+/**
+ * One Run's execution, from sandbox acquisition to release — Runtime R45-R48.
+ *
+ * SHARED BY SOLO RUNS, TEAM RUNS AND CHILD RUNS, which is why it is a parameter object
+ * rather than three near-identical private methods. A Team Run differs from a solo Run in
+ * four ways and no more: a tool provider that also offers `delegate`, a `manager`
+ * scheduling priority, a token callback feeding the tree accountant, and a finalizer that
+ * runs synthesis before `run_end`. A child Run differs in three: an overridden budget set
+ * (R22), a shared workspace (R21), and the same token callback.
+ *
+ * Everything else — the sandbox, the loop, the terminal write, the release — is identical,
+ * and duplicating it per Run kind is how the two would drift.
+ */
+export interface ExecuteRunInput {
+  runId: string;
+  agentVersionId: string;
+  snapshot: ResolvedSnapshot;
+  systemPrompt: string;
+  task: string;
+  controller: AbortController;
+  /** Team R14 — the manager's `context` argument, as an extra system block. */
+  contextBlock?: string;
+  /** Team R22 — the merged per-delegation budgets. Defaults to the snapshot's own. */
+  budgets?: Budgets;
+  /** Team R21 — children bind-mount the Team Run's host path, not a per-Run one. */
+  workspacePath?: string | null;
+  /** D5 / Team R32. */
+  priority?: ModelPriority;
+  /** Team R11 — the manager's provider, which also offers delegate and list_workers. */
+  tools?: ToolProvider;
+  /** Team R25. */
+  onModelTokens?: (promptTokens: number, completionTokens: number) => void;
+  /** Team R35-R38. */
+  finalize?: RunFinalizer;
 }
 
 export class RunOrchestrator {
@@ -77,6 +122,18 @@ export class RunOrchestrator {
     private readonly runs: RunStore,
     private readonly config: OrchestratorConfig,
   ) {}
+
+  /**
+   * The Kernel's ToolProvider — Team Orchestration R11.
+   *
+   * Exposed so the Team orchestrator can WRAP it for the manager's Run rather than
+   * assembling its own. R15's rule is that the loop imports no concrete implementation, and
+   * a Team-aware provider built around this one keeps that true: there is still exactly one
+   * place that decides what an ordinary Run may call.
+   */
+  get toolProvider(): ToolProvider {
+    return this.plugins.tools;
+  }
 
   async start(input: StartRunInput): Promise<{ runId: string }> {
     // 1. The pinned snapshot. Invariant 2 — a Run executes the version's captured
@@ -136,22 +193,32 @@ export class RunOrchestrator {
     this.active.set(run.run_id, controller);
 
     // R2 — returns before the Run completes. Deliberately not awaited.
-    void this.execute(run.run_id, version.agent_version_id, snapshot, systemPrompt, input.task, controller);
+    void this.executeRun({
+      runId: run.run_id,
+      agentVersionId: version.agent_version_id,
+      snapshot,
+      systemPrompt,
+      task: input.task,
+      controller,
+    });
 
     return { runId: run.run_id };
   }
 
-  private async execute(
-    runId: string,
-    agentVersionId: string,
-    snapshot: ResolvedSnapshot,
-    systemPrompt: string,
-    task: string,
-    controller: AbortController,
-  ): Promise<void> {
+  /**
+   * Run one Run to completion and write its terminal row.
+   *
+   * PUBLIC because the Team orchestrator drives the manager's Run and every child Run
+   * through it. It NEVER throws: invariant 6 says every Run terminates, and this is the
+   * only place that can guarantee it for a promise nobody is holding (R2).
+   */
+  async executeRun(input: ExecuteRunInput): Promise<AgentLoopResult | null> {
+    const { runId, snapshot, controller } = input;
+    this.active.set(runId, controller);
+
     const ctx: RunContext = {
       runId,
-      agentVersionId,
+      agentVersionId: input.agentVersionId,
       mode: snapshot.mode,
       corpusId: snapshot.corpus_id,
     };
@@ -159,29 +226,54 @@ export class RunOrchestrator {
     let sandbox: Awaited<ReturnType<SandboxProvider['acquire']>> | null = null;
     try {
       // 4. R45 — one container per Run. Only reached once the binding is known servable.
+      //    Team R20 — a worker acquires its OWN sandbox from its OWN Agent's profile; R21
+      //    — bind-mounted at the Team Run's shared host path so workers see each other's
+      //    writes.
       sandbox = await this.plugins.sandbox.acquire({
         runId,
         profile: snapshot.sandbox.profile,
-        workspacePath: snapshot.sandbox.workspace_required ? `/workspace/${runId}` : null,
+        workspacePath: snapshot.sandbox.workspace_required
+          ? (input.workspacePath ?? `/workspace/${runId}`)
+          : null,
       });
       ctx.sandbox = sandbox;
 
       // 5.
-      const result = await runAgentLoop(this.plugins, {
-        ctx,
-        bindingTag: snapshot.binding_tag,
-        systemPrompt,
-        userMessage: task,
-        contextWindow: snapshot.context_window,
-        reservedOutputTokens: this.config.reservedOutputTokens,
-        budgets: snapshot.budgets,
-        noProgressThreshold: this.config.noProgressThreshold,
-        autoInjectK: snapshot.auto_inject_k,
-        maxConcurrentTools: this.config.maxConcurrentTools,
-        signal: controller.signal,
-      });
+      const result = await runAgentLoop(
+        { ...this.plugins, ...(input.tools ? { tools: input.tools } : {}) },
+        {
+          ctx,
+          bindingTag: snapshot.binding_tag,
+          systemPrompt: input.systemPrompt,
+          userMessage: input.task,
+          ...(input.contextBlock ? { contextBlock: input.contextBlock } : {}),
+          contextWindow: snapshot.context_window,
+          reservedOutputTokens: this.config.reservedOutputTokens,
+          budgets: input.budgets ?? snapshot.budgets,
+          noProgressThreshold: this.config.noProgressThreshold,
+          autoInjectK: snapshot.auto_inject_k,
+          maxConcurrentTools: this.config.maxConcurrentTools,
+          admitModelRequest: (tag, priority) => this.config.scheduler.acquire(tag, priority),
+          priority: input.priority ?? 'default',
+          ...(input.onModelTokens ? { onModelTokens: input.onModelTokens } : {}),
+          ...(input.finalize ? { finalize: input.finalize } : {}),
+          signal: controller.signal,
+        },
+      );
 
       await this.runs.terminate(runId, result.outcome, result.result);
+      // R3, R57 — the counters the budget was actually enforced against, so
+      // GET /api/runs/{id} reports the same numbers `run_end` recorded.
+      await this.runs
+        .recordCounters(runId, {
+          steps: result.counters.stepsUsed,
+          modelTokens: result.counters.modelTokensUsed,
+          toolCalls: result.counters.toolCallsUsed,
+          wallClockMs: result.counters.wallClockMsUsed,
+          queuedMs: result.counters.queuedMsTotal,
+        })
+        .catch(() => undefined);
+      return result;
     } catch (err) {
       // INVARIANT 6 — every Run terminates. A throw here would otherwise leave the row
       // `running` forever, because nothing is awaiting this promise (R2).
@@ -192,6 +284,7 @@ export class RunOrchestrator {
           // Terminating failed too — the database is unreachable. Nothing further can be
           // recorded, and throwing from a detached promise would take the daemon down.
         });
+      return null;
     } finally {
       this.active.delete(runId);
       if (sandbox) {

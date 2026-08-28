@@ -21,8 +21,17 @@
  * the kind of arbitrary wait the platform forbids.
  */
 
-/** R21a — exactly two classes. Manager requests are admitted ahead of workers'. */
-export type PriorityClass = 'manager' | 'default';
+import type { ModelAdmission, ModelPriority } from '../kernel/types.js';
+
+/**
+ * R21a — exactly two classes. Manager requests are admitted ahead of workers'.
+ *
+ * ALIASED to the kernel contract rather than re-declared. Two identical string unions in
+ * two files is the shape a drift starts in: the loop names a priority against the kernel's
+ * type and this scheduler consumes it, so they must be the SAME type, not two that happen
+ * to agree today.
+ */
+export type PriorityClass = ModelPriority;
 
 const CLASS_ORDER: PriorityClass[] = ['manager', 'default'];
 
@@ -39,12 +48,7 @@ interface Waiter {
   admit: () => void;
 }
 
-export interface Admission {
-  /** R22 — recorded on the model_request Event and NOT charged to wall-clock. */
-  queuedMs: number;
-  /** Must be called when the request finishes, success or failure. */
-  release: () => void;
-}
+export type Admission = ModelAdmission;
 
 export class ModelScheduler {
   private readonly perTagActive = new Map<string, number>();

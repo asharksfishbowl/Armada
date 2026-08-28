@@ -4,10 +4,11 @@
  * A Step builds its context in ONE order, always:
  *
  *   1. system prompt (the Agent's persona)
- *   2. injected retrieval block  — first Step of a Turn only (R39)
- *   3. compacted history summary — if one exists
- *   4. retained history messages
- *   5. the current user message
+ *   2. delegation context block  — Team Orchestration R14, a child Run only
+ *   3. injected retrieval block  — first Step of a Turn only (R39)
+ *   4. compacted history summary — if one exists
+ *   5. retained history messages
+ *   6. the current user message
  *
  * THE ORDER IS FIXED SO A RUN IS REPRODUCIBLE FROM ITS EVENT STREAM. Every element is
  * recorded as an Event; if assembly order varied by state, replaying those Events would
@@ -22,6 +23,16 @@ import type { ChatMessage } from '../kernel/types.js';
 
 export interface ContextInput {
   systemPrompt: string;
+  /**
+   * Team Orchestration R14 — `delegate`'s optional `context` argument, carried as an
+   * additional system-role block on every Step of the child Run.
+   *
+   * Its own slot rather than being folded into the persona: the persona is the Agent's
+   * PINNED definition (invariant 2) and the delegation context is per-Run input from the
+   * manager. Concatenating them would make a child Run's system prompt differ from the
+   * Agent version's, which is exactly the divergence a pinned snapshot exists to prevent.
+   */
+  contextBlock: string | null;
   /** R39 — present only on the first Step of a Turn, and only with a bound corpus. */
   retrievalBlock: string | null;
   summary: string | null;
@@ -45,6 +56,12 @@ export function tokenBudget(contextWindow: number, reservedOutputTokens: number)
 
 export function buildContext(input: ContextInput): BuiltContext {
   const messages: ChatMessage[] = [{ role: 'system', content: input.systemPrompt }];
+
+  // Team R14 — before retrieval, because it is the manager's framing of the subtask and
+  // the retrieved chunks are grounding for that framing.
+  if (input.contextBlock) {
+    messages.push({ role: 'system', content: input.contextBlock });
+  }
 
   // R39 — the retrieval block is a SYSTEM-role block carrying each chunk's source_path and
   // content, placed before history so the model reads it as grounding rather than as a

@@ -51,6 +51,12 @@ import { createRunRoutes } from './gateway/routes/runs.js';
 import type { LiveBinding } from './models/binding-verifier.js';
 import { CompositeToolProvider } from './tools/composite-provider.js';
 import type { ResolvedSnapshot } from './agents/resolver.js';
+import { ModelScheduler } from './models/scheduler.js';
+import { TeamStore } from './teams/store.js';
+import { TeamOrchestrator } from './teams/orchestrator.js';
+import { createTeamContextProvider } from './teams/validation-context.js';
+import { loadTeamDirectory, formatTeamOutcomes } from './teams/file-loader.js';
+import { createTeamRoutes } from './gateway/routes/teams.js';
 
 const PORT = Number(process.env.ARMADA_PORT ?? 8080);
 const VERSION = process.env.ARMADA_VERSION ?? '0.1.0';
@@ -62,6 +68,8 @@ const MODELS_URL = process.env.ARMADA_MODELS_URL ?? 'http://armada-models:11434'
 const WORKSPACE_ROOT = process.env.ARMADA_WORKSPACE_ROOT ?? '/var/lib/armada/workspaces';
 // R31 — the directory of shipped Agent definitions, loaded into the registry at startup.
 const AGENTS_DIR = process.env.ARMADA_AGENTS_DIR ?? '/agents';
+// Team Orchestration R41 — the same, for Teams. Mounted read-only by docker-compose.yml.
+const TEAMS_DIR = process.env.ARMADA_TEAMS_DIR ?? '/teams';
 const DATABASE_URL = process.env.DATABASE_URL;
 
 function fail(message: string, detail?: string[]): never {
@@ -301,6 +309,45 @@ try {
  * Mounted in the SAME statement that creates it, and covered by a smoke assertion, because
  * this repo has now shipped five components that were written, tested, and never called.
  */
+/**
+ * ONE scheduler for the whole process — Runtime R20-R22, Team R31-R33, D5.
+ *
+ * `ModelScheduler` shipped in P7 fully written and fully unit tested, and nothing ever
+ * called it: every model request went straight to the adapter, so `max_concurrent_per_tag`
+ * and `max_concurrent_total` were configuration that enforced nothing. It is a constructor
+ * argument of `RunOrchestrator` rather than an optional one precisely so that omitting this
+ * line does not compile.
+ *
+ * One instance, because the limits are the MODEL SERVER's, not a Run's. A per-Run scheduler
+ * would let ten Runs each admit `max_concurrent_total` requests.
+ *
+ * Edge 7 of the build plan — these must agree with OLLAMA_MAX_LOADED_MODELS and
+ * OLLAMA_NUM_PARALLEL, or the daemon admits requests Ollama then serializes, and the
+ * unexplained latency shows up first under Teams where a manager and its workers hold
+ * different tags at once.
+ */
+const scheduling = (modelsConfig['scheduling'] ?? {}) as Record<string, unknown>;
+const modelScheduler = new ModelScheduler({
+  maxConcurrentPerTag: Number(scheduling['max_concurrent_per_tag'] ?? 1),
+  maxConcurrentTotal: Number(scheduling['max_concurrent_total'] ?? 2),
+});
+
+const reservedOutputTokens = Number(
+  (runtimeConfig['context'] as { reserved_output_tokens?: number } | undefined)
+    ?.reserved_output_tokens ?? 2048,
+);
+const noProgressThreshold = Number(runtimeConfig['no_progress_threshold'] ?? 3);
+
+// Read LIVE on every Run start (R17). Caching would let a retired binding keep starting
+// Runs until the daemon restarted — the exact staleness R18 exists to catch.
+const fetchLiveBindings = async (): Promise<LiveBinding[]> => {
+  const res = await fetch(`${FORGE_URL}/models/bindings`);
+  if (!res.ok) throw new Error(`forge returned HTTP ${res.status}`);
+  return (await res.json()) as LiveBinding[];
+};
+
+const runStore = new RunStore(pool);
+
 const runOrchestrator = new RunOrchestrator(
   {
     model: kernel.get('ModelAdapter'),
@@ -310,25 +357,66 @@ const runOrchestrator = new RunOrchestrator(
     sandbox: kernel.get('SandboxProvider'),
   },
   agentStore,
-  new RunStore(pool),
+  runStore,
   {
-    reservedOutputTokens: Number(
-      (runtimeConfig['context'] as { reserved_output_tokens?: number } | undefined)
-        ?.reserved_output_tokens ?? 2048,
-    ),
-    noProgressThreshold: Number(runtimeConfig['no_progress_threshold'] ?? 3),
+    reservedOutputTokens,
+    noProgressThreshold,
     maxConcurrentTools: Number(runtimeConfig['max_concurrent_tools'] ?? 4),
-    // Read LIVE on every Run start (R17). Caching would let a retired binding keep
-    // starting Runs until the daemon restarted — the exact staleness R18 exists to catch.
-    fetchLiveBindings: async () => {
-      const res = await fetch(`${FORGE_URL}/models/bindings`);
-      if (!res.ok) throw new Error(`forge returned HTTP ${res.status}`);
-      return (await res.json()) as LiveBinding[];
-    },
+    scheduler: modelScheduler,
+    fetchLiveBindings,
   },
 );
 
-const runRoutes = createRunRoutes(runOrchestrator, new RunStore(pool));
+const runRoutes = createRunRoutes(runOrchestrator, runStore);
+
+/**
+ * The Team surface — Team Orchestration R39-R41. All of P8.
+ *
+ * Constructed, MOUNTED, and file-loaded in one place, because the alternative has now cost
+ * this repo six components. The teams/ loader below is the exact analogue of the agents/
+ * one that was written in P4 and called by nothing until P7 noticed `GET /api/agents`
+ * answering 200 with an empty list.
+ */
+const teamStore = new TeamStore(pool);
+const teamContext = createTeamContextProvider({ pool, runtimeConfig, modelsConfig });
+
+const teamOrchestrator = new TeamOrchestrator(
+  { model: kernel.get('ModelAdapter'), events: kernel.get('EventSink') },
+  teamStore,
+  agentStore,
+  runStore,
+  runOrchestrator,
+  {
+    reservedOutputTokens,
+    noProgressThreshold,
+    fetchLiveBindings,
+    // R32 — synthesis is a manager request, so it is admitted ahead of any worker still
+    // queued for the same tag.
+    admitModelRequest: (tag, priority) => modelScheduler.acquire(tag, priority),
+  },
+);
+
+const teamRoutes = createTeamRoutes(teamStore, teamContext, teamOrchestrator);
+
+/**
+ * Load teams/ into the registry — R41, R45.
+ *
+ * NON-FATAL BY DESIGN, exactly like agents/: a bad file is skipped with its path and full
+ * error list and the daemon still serves. It runs AFTER the Agent load because a Team
+ * resolves its roster against Agents, and a Team file loaded first would be skipped for
+ * naming workers that had not been read yet.
+ */
+try {
+  const outcomes = await loadTeamDirectory(TEAMS_DIR, teamStore, await teamContext());
+  const text = formatTeamOutcomes(outcomes);
+  if (text.trim() !== '') process.stdout.write(`\n${text}\n\n`);
+} catch (err) {
+  process.stderr.write(
+    `\n⚠️  armada-daemon: teams/ could not be loaded — ${err instanceof Error ? err.message : String(err)}\n` +
+      '  Team definitions resolve their roster against Agents in this daemon\'s database.\n' +
+      '  GET /api/teams will be empty until that succeeds and the daemon restarts.\n\n',
+  );
+}
 
 const gateway = createGateway({
   port: PORT,
@@ -338,6 +426,7 @@ const gateway = createGateway({
   kernel,
   agentRoutes,
   runRoutes,
+  teamRoutes,
 });
 
 /**

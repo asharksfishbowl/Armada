@@ -72,6 +72,22 @@ export class AgentStore {
     return result.rows[0] ?? null;
   }
 
+  /**
+   * Team Orchestration R10, invariant 2 — read a PINNED version directly by its id.
+   *
+   * A Team's `resolved_roster` pins `agent_version_id` for every member, and a delegation
+   * executes that exact row. Going back through `(agent_id, current_version)` would follow
+   * the Agent as it moves, which is precisely what edge 10 forbids: all delegations within
+   * one Team Run target the same worker version even if the Agent is edited mid-Run.
+   */
+  async getVersionById(agentVersionId: string): Promise<AgentVersionRecord | null> {
+    const result = await this.pool.query<AgentVersionRecord>(
+      'SELECT * FROM agent_versions WHERE agent_version_id = $1',
+      [agentVersionId],
+    );
+    return result.rows[0] ?? null;
+  }
+
   /** R29 — non-deleted Agents, with the resolved binding tag for the list view. */
   async list(): Promise<Record<string, unknown>[]> {
     const result = await this.pool.query(
