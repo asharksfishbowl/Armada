@@ -338,9 +338,37 @@ section '6. Malformed shortlist fails startup (R3, R1b)'
 # cases below; the EXISTING backup_shortlist/restore_shortlist machinery and its
 # EXIT/INT/TERM trap are reused rather than duplicated.
 restart_and_capture() {
+    # A container that exits on bad config FLAPS: it dies, the restart policy brings it
+    # back, it dies again. Sampling the state once after a fixed sleep is a coin toss —
+    # it can land on an "up, about to crash" moment and report `running` for a service
+    # that is refusing to run. That produced a false FAIL on a commit where the two
+    # assertions above it — both reading the rejection out of the logs — passed.
+    #
+    # So OBSERVE OVER TIME rather than at an instant: poll, and treat the service as
+    # refusing if it is ever seen not-running, or if Docker has restarted it. A service
+    # that genuinely starts clean is never once caught down and never increments its
+    # restart count, so this cannot pass a healthy forge by accident.
     docker compose restart armada-forge >/dev/null 2>&1
-    sleep 10
-    forge_state="$(docker compose ps --format '{{.Service}} {{.State}}' 2>/dev/null | awk '$1=="armada-forge"{print $2}')"
+
+    local restarts_before
+    restarts_before="$(docker inspect -f '{{.RestartCount}}' "$(docker compose ps -q armada-forge 2>/dev/null)" 2>/dev/null || echo 0)"
+
+    forge_state=running
+    for _ in $(seq 1 15); do
+        local st
+        st="$(docker compose ps -a --format '{{.Service}} {{.State}}' 2>/dev/null | awk '$1=="armada-forge"{print $2}')"
+        case "$st" in
+            ''|running) ;;
+            *) forge_state="$st"; break ;;
+        esac
+        local restarts_now
+        restarts_now="$(docker inspect -f '{{.RestartCount}}' "$(docker compose ps -q armada-forge 2>/dev/null)" 2>/dev/null || echo 0)"
+        if [ "${restarts_now:-0}" -gt "${restarts_before:-0}" ]; then
+            forge_state="restarting"; break
+        fi
+        sleep 1
+    done
+
     forge_logs="$(docker compose logs --tail 40 armada-forge 2>/dev/null)"
 }
 
