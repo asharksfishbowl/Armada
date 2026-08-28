@@ -54,7 +54,7 @@ unchanged. The status vocabulary is bit-for-bit identical to the pre-oak spec.
 | File | What it is | Authoritative? |
 |---|---|---|
 | `tokens-reference.html` | Live rendering of the **merged oak** tokens, the six marks, and all four status families. Computes R139 contrast and runs the R141/R142b desaturation test in-browser. Regenerated 2026-08-28; token values verified equal to the spec. | **No** — the spec is. An instrument for checking the build against it. |
-| `playground-B.html` | **The locked mock. [LOCKED ★]** Cited by spec R3a as the provenance of the oak ramp. Carries a slate ⇄ oak toggle for comparison. | **No** — but do not delete; R3a names it. |
+| `playground-B.html` | **The locked mock. [LOCKED ★]** The artifact the oak ramp was derived from. Carries a slate ⇄ oak toggle for comparison. Per-user and gitignored — the **committed** record of the decision is `specs/dashboard/design-dashboard-oak-amendment.md`, which is what R3a cites. | No |
 | `playground-A.html` | Four-preset exploration, pre-dates the design spec. Superseded. Retained as a record only. | No |
 | `index.md` | This file. | — |
 
