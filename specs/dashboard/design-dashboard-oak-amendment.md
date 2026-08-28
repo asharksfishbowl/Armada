@@ -4,6 +4,8 @@
 **Amends:** `specs/dashboard/design-dashboard.md` Requirements 2, 3, and the informative
 table under Requirement 139.
 **Locked mock:** `design-references/playground-B.html` — `http://DEX_HOST:8765/armada/playground-B.html`
+*(Per-user artifact, excluded by `.gitignore` and not present in a fresh clone. **This document is
+the committed record of the decision** and is what `design-dashboard.md` R3a cites.)*
 **Picked by:** the Director, 2026-08-27.
 
 ## What this is
