@@ -101,6 +101,21 @@ jobs:
           docker compose version
           jq --version
 
+      # R45c bind-mounts the workspace root at the SAME path inside and outside the
+      # daemon, because the daemon passes `--volume <workspace>:/workspace` to Docker
+      # and Docker resolves that against the HOST. The default is /var/lib/armada/
+      # workspaces, which the runner user cannot create — so section 7 skipped, and
+      # took the ingestion, embedding-dimension and R16b checks with it.
+      #
+      # Provisioned rather than redirected: pointing ARMADA_WORKSPACE_ROOT at a temp
+      # dir would pass while testing a path no real installation uses. Creating the
+      # real default keeps CI honest about what it verified.
+      - name: Provision workspace root
+        run: |
+          sudo mkdir -p /var/lib/armada/workspaces
+          sudo chown -R "$(id -u):$(id -g)" /var/lib/armada
+          ls -ld /var/lib/armada/workspaces
+
       - name: Smoke test
         run: ./scripts/smoke-test.sh
 
