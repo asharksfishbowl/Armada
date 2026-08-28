@@ -1,9 +1,9 @@
 /**
  * armada-daemon — process entry and Kernel bootstrap.
  *
- * P3 SCOPE: gateway, kernel, plugin registry, event log, ordered replay, health.
- * NO AGENT LOOP — that is P7, after Agent Definition (P4), so it executes real validated
- * Agents rather than fixtures.
+ * P7 SCOPE: gateway, kernel, plugin registry, event log, ordered replay, health, the
+ * Agent surface (routes + agents/ loaded at startup), the model adapter and the tool
+ * provider. The Step loop and POST /api/runs are the remainder of P7.
  *
  * STARTUP ORDER MATTERS AND IS DELIBERATE:
  *   1. config -> 2. pool -> 3. Kernel.register -> 4. listen
@@ -13,11 +13,15 @@
  * non-zero (R14) instead of producing a daemon that serves 503 forever and looks like a
  * database problem.
  *
- * EventSink (P3), RetrievalProvider (P6), and SandboxProvider (P5) are real. The
- * remaining two must still be REGISTERED for the Kernel to consider itself ready (R14)
- * even though nothing calls them until later phases. They are registered as explicit not-implemented stubs that THROW
- * when invoked, rather than as silent no-ops — a stub that quietly returns nothing would
- * surface later as an empty tool list rather than as a missing plugin.
+ * ALL FIVE PLUGIN INTERFACES ARE NOW REAL. EventSink (P3), SandboxProvider (P5),
+ * RetrievalProvider (P6), and as of P7 both ModelAdapter and ToolProvider. The
+ * not-implemented stubs the last two used to carry are gone with them.
+ *
+ * Those stubs THREW rather than returning empty, which is why their absence was never
+ * mistaken for working code — an interface that silently answers "nothing" surfaces as an
+ * Agent with no tools rather than as a missing plugin. Worth remembering now that they are
+ * gone: it is the same failure the routes and the file loader DID hit, twice, because a
+ * component that is merely unreachable throws nothing at all.
  */
 
 import { Pool } from 'pg';
@@ -39,6 +43,10 @@ import { PeerProbe } from './gateway/routes/health.js';
 import { createAgentRoutes } from './gateway/routes/agents.js';
 import { AgentStore } from './agents/store.js';
 import { createContextProvider } from './agents/validation-context.js';
+import { loadAgentDirectory, formatOutcomes } from './agents/file-loader.js';
+import { OpenAICompatibleAdapter } from './models/openai-adapter.js';
+import { CompositeToolProvider } from './tools/composite-provider.js';
+import type { ResolvedSnapshot } from './agents/resolver.js';
 
 const PORT = Number(process.env.ARMADA_PORT ?? 8080);
 const VERSION = process.env.ARMADA_VERSION ?? '0.1.0';
@@ -48,6 +56,8 @@ const MODELS_URL = process.env.ARMADA_MODELS_URL ?? 'http://armada-models:11434'
 // R45c — every workspace_path must resolve beneath this shared root, which Compose
 // bind-mounts into the daemon at the same path it occupies on the host.
 const WORKSPACE_ROOT = process.env.ARMADA_WORKSPACE_ROOT ?? '/var/lib/armada/workspaces';
+// R31 — the directory of shipped Agent definitions, loaded into the registry at startup.
+const AGENTS_DIR = process.env.ARMADA_AGENTS_DIR ?? '/agents';
 const DATABASE_URL = process.env.DATABASE_URL;
 
 function fail(message: string, detail?: string[]): never {
@@ -103,31 +113,41 @@ const pool = new Pool({
   connectionTimeoutMillis: 5_000,
 });
 
-/**
- * A plugin that is declared but not yet implemented.
- *
- * Throws on use rather than returning an empty result. An interface that silently answers
- * "nothing" would make a later phase's bug look like ordinary behaviour — an Agent with no
- * tools, a corpus with no chunks — instead of naming the phase that has not landed.
- */
-function notImplemented(iface: string, phase: string): never {
-  throw new Error(`${iface} is not implemented until ${phase}`);
-}
-
 const factories: FactoryTables = {
   ModelAdapter: {
-    OpenAICompatibleAdapter: () => ({
-      name: 'OpenAICompatibleAdapter',
-      chat: () => notImplemented('ModelAdapter.chat', 'P7'),
-      capabilities: () => notImplemented('ModelAdapter.capabilities', 'P7'),
-    }),
+    // Real from P7. Cross-service boundary 2 — the daemon consumes ModelBindings by tag
+    // over the OpenAI-compatible API and never reaches into training. Capabilities come
+    // from forge rather than the model server: the binding is the pinned contract, the
+    // server is one implementation of it, and they can disagree.
+    OpenAICompatibleAdapter: () =>
+      new OpenAICompatibleAdapter({ modelsUrl: MODELS_URL, forgeUrl: FORGE_URL }),
   },
   ToolProvider: {
-    CompositeToolProvider: () => ({
-      name: 'CompositeToolProvider',
-      list: () => notImplemented('ToolProvider.list', 'P7 (the agent loop)'),
-      invoke: () => notImplemented('ToolProvider.invoke', 'P7 (the agent loop)'),
-    }),
+    // Real from P7. Merges built-ins with search_knowledge behind one interface, so the
+    // loop asks one thing what tools a Run has (R15 — the loop imports no concrete
+    // implementation). MCP tools join in P12.
+    CompositeToolProvider: (deps) =>
+      new CompositeToolProvider({
+        // The grant list is read from the Run's PINNED snapshot (invariant 2), never
+        // re-derived from current config — that would let a Run gain or lose a tool its
+        // pinned version never had.
+        grantsFor: async (ctx) => {
+          const rows = await deps.pool.query<{ resolved_snapshot: ResolvedSnapshot }>(
+            'SELECT resolved_snapshot FROM agent_versions WHERE agent_version_id = $1',
+            [ctx.agentVersionId],
+          );
+          return rows.rows[0]?.resolved_snapshot?.tools ?? [];
+        },
+        retrieval: kernelRef().get('RetrievalProvider'),
+        searchOptions: {
+          searchMaxK: Number(
+            (runtimeConfig['retrieval'] as { search_max_k?: number } | undefined)?.search_max_k ?? 10,
+          ),
+          defaultK: Number(
+            (runtimeConfig['retrieval'] as { auto_inject_k?: number } | undefined)?.auto_inject_k ?? 4,
+          ),
+        },
+      }),
   },
   SandboxProvider: {
     // Real from P5. One sibling container per Run, non-root, all capabilities dropped,
@@ -155,6 +175,23 @@ const factories: FactoryTables = {
     // The one real implementation in P3. Invariant 5 lives here.
     PostgresEventSink: (deps) => new PostgresEventSink(deps.pool, deps.credentialEnvNames),
   },
+};
+
+/**
+ * Lets one plugin depend on another without the factory table needing them in order.
+ *
+ * CompositeToolProvider needs the RetrievalProvider, and both are registered by the same
+ * Kernel.register call — so at factory-table construction time neither exists. Reading
+ * through this closure defers the lookup to first use, by which point registration has
+ * completed or the process has already exited non-zero (R14).
+ *
+ * A direct `kernel.get(...)` in the factory would throw on a variable used before
+ * assignment, which would surface as a plugin fault rather than as the ordering problem
+ * it actually is.
+ */
+const kernelRef = (): Kernel => {
+  if (!kernel) throw new Error('Kernel accessed before registration completed');
+  return kernel;
 };
 
 let kernel: Kernel;
@@ -209,16 +246,48 @@ void kernel
  * forge that cannot answer yields 503 and persists nothing — never a validation error,
  * which would blame the operator's definition for a peer being down.
  */
-const agentRoutes = createAgentRoutes(
-  new AgentStore(pool),
-  createContextProvider({
-    forgeUrl: FORGE_URL,
-    runtimeConfig,
-    sandboxProfiles: sandboxProfiles as unknown as Record<string, Record<string, unknown>>,
-    // NAMES only. The values behind them are env var names, never secrets (R59).
-    mcpServers: Object.keys((mcpConfig['servers'] ?? {}) as Record<string, unknown>),
-  }),
-);
+const agentStore = new AgentStore(pool);
+const agentContext = createContextProvider({
+  forgeUrl: FORGE_URL,
+  runtimeConfig,
+  sandboxProfiles: sandboxProfiles as unknown as Record<string, Record<string, unknown>>,
+  // NAMES only. The values behind them are env var names, never secrets (R59).
+  mcpServers: Object.keys((mcpConfig['servers'] ?? {}) as Record<string, unknown>),
+});
+
+const agentRoutes = createAgentRoutes(agentStore, agentContext);
+
+/**
+ * Load agents/ into the registry — Agent Definition R31, edges 3 and 17.
+ *
+ * ALSO WRITTEN IN P4 AND ALSO NEVER CALLED. Mounting the routes made GET /api/agents
+ * answer 200 with an EMPTY list, which the smoke test caught immediately:
+ *
+ *   FAIL both shipped example Agents loaded
+ *         expected: chef,frontend-engineer
+ *         observed: <none>
+ *
+ * Two components, written and tested, neither reachable. The route was the first layer;
+ * this was underneath it.
+ *
+ * NON-FATAL BY DESIGN. A bad file is skipped with its path and full error list (R31), and
+ * the daemon still serves — an operator with one broken YAML should not lose the whole
+ * runtime. But forge being unreachable is different: NOTHING can be validated, so every
+ * shipped Agent would be skipped as invalid and the daemon would come up empty while
+ * looking healthy. That is reported as the peer fault it is, and the daemon still starts,
+ * because the health endpoint's peer strip is what an operator reads next.
+ */
+try {
+  const outcomes = await loadAgentDirectory(AGENTS_DIR, agentStore, await agentContext());
+  const text = formatOutcomes(outcomes);
+  if (text.trim() !== '') process.stdout.write(`\n${text}\n\n`);
+} catch (err) {
+  process.stderr.write(
+    `\n⚠️  armada-daemon: agents/ could not be loaded — ${err instanceof Error ? err.message : String(err)}\n` +
+      `  Agent definitions are validated against ModelBindings and Corpora in armada-forge.\n` +
+      `  GET /api/agents will be empty until forge is reachable and the daemon restarts.\n\n`,
+  );
+}
 
 const gateway = createGateway({ port: PORT, version: VERSION, pool, probe, kernel, agentRoutes });
 
