@@ -19,6 +19,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import type { Pool } from 'pg';
 import type { Kernel } from '../kernel/kernel.js';
 import { buildHealth, PeerProbe } from './routes/health.js';
+import { dispatchAgentRoute, type AgentRoutes } from './routes/agent-router.js';
 import { WsRouter } from './ws-router.js';
 
 export interface GatewayOptions {
@@ -32,6 +33,12 @@ export interface GatewayOptions {
    * requests against a half-registered Kernel.
    */
   kernel: Kernel;
+  /**
+   * Optional so P3's tests can build a gateway with no Agent surface. In the real process
+   * index.ts always supplies it — omitting it there is what left `/api/agents` answering
+   * 404 through all of P4, P5 and P6.
+   */
+  agentRoutes?: AgentRoutes;
 }
 
 export interface Gateway {
@@ -52,8 +59,38 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(payload);
 }
 
+/** Thrown by readJsonBody so the handler can answer 400 rather than 500. */
+class BadJson extends Error {}
+
+/**
+ * A request body is capped rather than read unbounded. Without a cap, one client streaming
+ * an endless body holds a connection and grows the buffer until the process dies — and this
+ * daemon is the thing that would have to report that, so it must not be the thing that
+ * fails. 1 MiB is far above any Agent definition and far below anything that matters.
+ */
+const MAX_BODY_BYTES = 1024 * 1024;
+
+async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of req) {
+    total += (chunk as Buffer).length;
+    if (total > MAX_BODY_BYTES) throw new BadJson(`body exceeds ${MAX_BODY_BYTES} bytes`);
+    chunks.push(chunk as Buffer);
+  }
+  const raw = Buffer.concat(chunks).toString('utf8');
+  // An empty body is `undefined`, not `null`: validation reports "definition is required"
+  // rather than "expected object, got null", which names the actual mistake.
+  if (raw.trim() === '') return undefined;
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    throw new BadJson(err instanceof Error ? err.message : String(err));
+  }
+}
+
 export function createGateway(options: GatewayOptions): Gateway {
-  const { port, version, pool, probe } = options;
+  const { port, version, pool, probe, agentRoutes } = options;
   const wsRouter = new WsRouter(options.kernel.get('EventSink'));
 
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
@@ -95,6 +132,38 @@ export function createGateway(options: GatewayOptions): Gateway {
         connection: 'Upgrade',
       });
       res.end(body);
+      return;
+    }
+
+    if (agentRoutes) {
+      // The body is read LAZILY, by the matched route. Reading it up front would consume
+      // the stream for GET and DELETE too, and a matcher that has already decided the path
+      // is not ours should not have drained the request to find out.
+      const url = new URL(req.url ?? '', 'http://localhost');
+      void dispatchAgentRoute(
+        agentRoutes,
+        req.method ?? 'GET',
+        path,
+        url.searchParams,
+        () => readJsonBody(req),
+      )
+        .then((result) => {
+          if (result === null) {
+            sendJson(res, 404, { error: 'not_found', path });
+            return;
+          }
+          sendJson(res, result.status, result.body);
+        })
+        .catch((err: unknown) => {
+          if (err instanceof BadJson) {
+            sendJson(res, 400, { error: 'invalid_json', detail: err.message });
+            return;
+          }
+          // An unexpected throw is a daemon fault, not the caller's. 500 with no internals
+          // — the security checklist forbids leaking a stack trace to a client, and the
+          // event log is where the detail belongs.
+          sendJson(res, 500, { error: 'internal_error' });
+        });
       return;
     }
 

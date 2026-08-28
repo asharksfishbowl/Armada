@@ -36,6 +36,9 @@ import {
 } from './sandbox/docker-sandbox.js';
 import { createGateway } from './gateway/server.js';
 import { PeerProbe } from './gateway/routes/health.js';
+import { createAgentRoutes } from './gateway/routes/agents.js';
+import { AgentStore } from './agents/store.js';
+import { createContextProvider } from './agents/validation-context.js';
 
 const PORT = Number(process.env.ARMADA_PORT ?? 8080);
 const VERSION = process.env.ARMADA_VERSION ?? '0.1.0';
@@ -194,7 +197,30 @@ void kernel
     // and the next restart tries again.
   });
 
-const gateway = createGateway({ port: PORT, version: VERSION, pool, probe, kernel });
+/**
+ * The Agent surface — Agent Definition R26-R30.
+ *
+ * P4 wrote every handler and left this line out, so `/api/agents` answered 404 through
+ * P4, P5 and P6 while the smoke test recorded it as "routes wire up in P7". The handlers
+ * were never the missing part.
+ *
+ * The context provider fans out to forge on every write, because bindings and corpora live
+ * there (cross-service boundaries 1 and 2) and validation resolves against live state. A
+ * forge that cannot answer yields 503 and persists nothing — never a validation error,
+ * which would blame the operator's definition for a peer being down.
+ */
+const agentRoutes = createAgentRoutes(
+  new AgentStore(pool),
+  createContextProvider({
+    forgeUrl: FORGE_URL,
+    runtimeConfig,
+    sandboxProfiles: sandboxProfiles as unknown as Record<string, Record<string, unknown>>,
+    // NAMES only. The values behind them are env var names, never secrets (R59).
+    mcpServers: Object.keys((mcpConfig['servers'] ?? {}) as Record<string, unknown>),
+  }),
+);
+
+const gateway = createGateway({ port: PORT, version: VERSION, pool, probe, kernel, agentRoutes });
 
 /**
  * Compose sends SIGTERM on `docker compose down`. Close the listener, drop WebSocket
