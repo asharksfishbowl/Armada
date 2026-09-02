@@ -30,3 +30,6 @@ design-references/*
 
 # Dashboard test compile output
 services/dashboard/dist-test/
+question-answers-archive.groovy
+design-queue.groovy
+marketing-queue.groovy
